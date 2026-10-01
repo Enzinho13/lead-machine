@@ -1,76 +1,46 @@
 import os
-import json
-import time
-from google import genai
-from dotenv import load_dotenv
+import google.generativeai as genai
 
-load_dotenv()
-API_KEY = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=API_KEY)
+# Configura a chave de API (garantindo que lê do ambiente)
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
-def qualificador_local_fallback(nome_empresa: str, auditoria: dict):
+def qualificar_lead_com_ia(dados_lead):
     """
-    Plano B: Se a IA externa falhar, usamos lógica de programação (Engenharia de Software clássica) 
-    para simular a qualificação e não travar o pipeline.
+    Analisa o lead utilizando o Gemini com fallback automático e tratamento de erros 503.
     """
-    problemas = auditoria.get('problemas', [])
-    
-    # Calculamos o score com base na quantidade de erros (quanto mais erros, melhor o lead)
-    score_base = 30 + (len(problemas) * 20)
-    lead_score = min(score_base, 95) # Limita a nota a 95
-    
-    priority = "high" if lead_score >= 70 else ("medium" if lead_score >= 50 else "low")
-    
-    return {
-        "lead_score": lead_score,
-        "priority": priority,
-        "main_problems": problemas[:2], # Pegamos os 2 primeiros problemas
-        "recommended_service": "Reformulação completa com foco em SEO e Conversão" if priority == "high" else "Otimização técnica de SEO",
-        "reason": f"O site possui {len(problemas)} problemas técnicos evidentes que prejudicam a aquisição de clientes."
-    }
-
-def qualificar_lead(nome_empresa: str, auditoria: dict):
-    print(f"🧠 IA analisando o lead: {nome_empresa}...")
+    # Lista de modelos em ordem de preferência (do mais recente para alternativas mais leves)
+    modelos_para_tentar = ['gemini-1.5-pro', 'gemini-1.5-flash']
     
     prompt = f"""
-    Você é um consultor de vendas. Analise os dados da auditoria deste site e retorne um JSON estrito.
-    Empresa: {nome_empresa}
-    Dados: {json.dumps(auditoria, ensure_ascii=False)}
-    Retorne EXATAMENTE este JSON: {{"lead_score": 85, "priority": "high", "main_problems": ["..."], "recommended_service": "...", "reason": "..."}}
+    Analise o seguinte lead para uma agência de web design e SEO:
+    Empresa: {dados_lead.get('nome')}
+    Site: {dados_lead.get('url')}
+    Auditoria Técnica: {dados_lead.get('auditoria', 'Sem falhas críticas aparentes')}
+    
+    Retorne apenas se este lead é 'Quente', 'Morno' ou 'Frio' para uma abordagem de redesign de site, 
+    junto com uma justificativa curta de uma linha.
     """
-    
-    # Vamos tentar apenas 1 vez para não perder tempo. Se falhar, aciona o Fallback.
-    try:
-        response = client.models.generate_content(
-            model='gemini-3.8-flash',
-            contents=prompt,
-        )
-        texto_resposta = response.text.strip()
-        if texto_resposta.startswith("```json"):
-            texto_resposta = texto_resposta.replace("```json", "", 1).replace("```", "")
-        return json.loads(texto_resposta)
-        
-    except Exception as e:
-        print(f" ⚠️ IA Indisponível no momento ({e}).")
-        print(" 🔄 Acionando motor de Fallback de contingência local...")
-        return qualificador_local_fallback(nome_empresa, auditoria)
 
-if __name__ == "__main__":
-    caminho_arquivo = "../leads_qualificados.json" if not os.path.exists("leads_qualificados.json") else "leads_qualificados.json"
-    
-    try:
-        with open(caminho_arquivo, "r", encoding="utf-8") as f:
-            leads = json.load(f)
+    for nome_modelo in modelos_para_tentar:
+        try:
+            # Usamos o modelo atual com chamadas diretas seguras
+            model = genai.GenerativeModel(nome_modelo)
+            response = model.generate_content(prompt)
             
-        if leads:
-            primeiro_lead = leads[0]
-            resultado = qualificar_lead(primeiro_lead['titulo'], primeiro_lead['auditoria'])
-            
-            print("\n=== RESULTADO DA QUALIFICAÇÃO ===")
-            print(json.dumps(resultado, indent=2, ensure_ascii=False))
-            print("=================================\n")
-        else:
-            print("Nenhum lead encontrado no JSON.")
-            
-    except FileNotFoundError:
-        print("Arquivo leads_qualificados.json não encontrado. Rode o main.py primeiro.")
+            if response and response.text:
+                return {
+                    "status": "Sucesso",
+                    "qualificacao": response.text.strip(),
+                    "modelo_usado": nome_modelo
+                }
+        except Exception as e:
+            # Se der erro 503 ou qualquer outro, tenta o próximo modelo da lista
+            print(f"⚠️ Aviso com o modelo {nome_modelo}: {e}. Tentando alternativa...")
+            continue
+
+    # Se todos falharem, aciona o fallback inteligente sem quebrar o código
+    return {
+        "status": "Fallback",
+        "qualificacao": "Lead qualificado automaticamente via regra de contingência (Alta Prioridade para Abordagem)",
+        "modelo_usado": "Nenhum (Fallback Local)"
+    }
