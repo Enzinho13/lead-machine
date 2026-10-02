@@ -1,7 +1,6 @@
 import sqlite3
 import os
 
-# Descobre a pasta raiz do projeto automaticamente
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 DB_PATH = os.path.join(BASE_DIR, "leads.db")
 
@@ -21,12 +20,19 @@ def init_db():
         )
     ''')
     
-    # Adiciona colunas novas automaticamente sem quebrar a tabela atual
-    for col in ["score INTEGER DEFAULT 0", "motivos_score TEXT DEFAULT ''", "vercel_url TEXT DEFAULT ''"]:
+    colunas_novas = [
+        "score INTEGER DEFAULT 0",
+        "motivos_score TEXT DEFAULT ''",
+        "vercel_url TEXT DEFAULT ''",
+        "outreach_message TEXT DEFAULT ''",
+        "design_brief TEXT DEFAULT ''"
+    ]
+    
+    for col in colunas_novas:
         try:
             c.execute(f"ALTER TABLE leads ADD COLUMN {col}")
         except sqlite3.OperationalError:
-            pass # Coluna já existe
+            pass 
             
     conn.commit()
     conn.close()
@@ -36,8 +42,8 @@ def insert_lead(nome, url, descricao, nicho, cidade):
     c = conn.cursor()
     try:
         c.execute('''
-            INSERT INTO leads (nome, url, descricao, nicho, cidade, status, score, motivos_score, vercel_url)
-            VALUES (?, ?, ?, ?, ?, 'NEW', 0, '', '')
+            INSERT INTO leads (nome, url, descricao, nicho, cidade, status)
+            VALUES (?, ?, ?, ?, ?, 'NEW')
         ''', (nome, url, descricao, nicho, cidade))
         conn.commit()
     except sqlite3.IntegrityError:
@@ -54,7 +60,6 @@ def get_all_leads():
     conn.close()
     return [dict(row) for row in rows]
 
-# Agora esta função guarda o link da vercel
 def update_lead_status(url, status, vercel_url=''):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -66,5 +71,12 @@ def update_lead_score(url, score, motivos):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("UPDATE leads SET score = ?, motivos_score = ?, status = 'AUDITED' WHERE url = ?", (score, motivos, url))
+    conn.commit()
+    conn.close()
+
+def save_outreach_data(url, outreach_message, design_brief):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE leads SET outreach_message = ?, design_brief = ? WHERE url = ?", (outreach_message, str(design_brief), url))
     conn.commit()
     conn.close()
