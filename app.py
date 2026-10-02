@@ -1,139 +1,194 @@
+"""
+Lead Machine — Dashboard (Streamlit)
+Command center for the full pipeline.
+"""
 import streamlit as st
 import os
 import sys
 import time
 import pandas as pd
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
 
+from database import init_db, get_all_leads, update_lead_status, update_lead_score, get_leads_by_status, save_audit
+from lead_scraper import buscar_empresas
+from auditor import auditar_site_lead
+from ai_qualifier import qualificar_lead_com_ia
 from main import executar_pipeline_completo
-from database import get_all_leads, update_lead_status, init_db
 
-try:
-    from lead_scraper import buscar_empresas
-except ImportError:
-    st.error("⚠ Falha crítica: Módulo de discovery inacessível.")
-
-# --- BARREIRA DE PROTEÇÃO ---
+# --- Init ---
 init_db()
 
-st.set_page_config(page_title="Lead Machine | Megabrain", page_icon="🧠", layout="wide")
-st.title("🧠 Lead Machine - Command Center")
+st.set_page_config(page_title="Lead Machine", page_icon="🧠", layout="wide")
+st.title("🧠 Lead Machine — Command Center")
+
+# --- Sidebar: CRM Stats ---
+with st.sidebar:
+    st.header("📊 CRM")
+    all_leads = get_all_leads()
+    if all_leads:
+        status_counts = {}
+        for lead in all_leads:
+            s = lead.get("status", "UNKNOWN")
+            status_counts[s] = status_counts.get(s, 0) + 1
+        for status, count in sorted(status_counts.items()):
+            st.metric(status, count)
+    st.divider()
+    st.caption(f"Total: {len(all_leads)} leads")
+
+# --- Main Layout ---
 col1, col2 = st.columns([1, 2])
 
+# === DISCOVERY ===
 with col1:
-    st.header("🎯 1. Discovery Engine")
-    nicho_alvo = st.text_input("Qual é o Nicho?", placeholder="Ex: Escritorio de Advogados")
-    cidade_alvo = st.text_input("Qual é a Região/Cidade?", placeholder="Ex: São Paulo")
-    max_leads = st.slider("Alvo de leads limpos:", min_value=5, max_value=50, value=15)
-    
+    st.header("🎯 Discovery Engine")
+    nicho = st.text_input("Nicho", placeholder="Ex: Escritório de Advogados")
+    cidade = st.text_input("Cidade/Região", placeholder="Ex: São Paulo")
+    max_leads = st.slider("Quantidade de leads:", min_value=5, max_value=50, value=15)
+
     if st.button("🔍 Iniciar Discovery"):
-        if nicho_alvo and cidade_alvo:
-            with st.spinner(f"Executando crawler para {max_leads} leads limpos..."):
+        if nicho and cidade:
+            with st.spinner(f"Buscando {max_leads} leads..."):
                 try:
-                    buscar_empresas(nicho_alvo, cidade_alvo, max_resultados=max_leads)
-                    st.success("Discovery concluído. Banco de dados atualizado.")
+                    buscar_empresas(nicho, cidade, max_resultados=max_leads)
+                    st.success("Discovery concluído.")
                     time.sleep(1)
                     st.rerun()
                 except Exception as e:
-                    st.error(f"[SYSTEM ERROR] {e}")
+                    st.error(f"Erro: {e}")
         else:
-            st.warning("Parâmetros de busca insuficientes.")
+            st.warning("Preencha nicho e cidade.")
 
+# === PIPELINE ===
 with col2:
-    st.header("⚙️ 2. Radar de Qualificação & Pipeline")
-    
+    st.header("⚙️ Pipeline de Qualificação")
+
     leads = get_all_leads()
-    
-    if leads:
+
+    if not leads:
+        st.info("Database vazio. Inicie o Discovery Engine.")
+    else:
         df = pd.DataFrame(leads)
-        
-        # --- SISTEMA DE ABAS ---
-        tab_pendentes, tab_concluidos = st.tabs(["🔴 Fila de Trabalho (Pendentes)", "🟢 Deploys Concluídos"])
-        
+
+        tab_pendentes, tab_concluidos, tab_todos = st.tabs([
+            "🔴 Fila de Trabalho",
+            "🟢 Deploys Concluídos",
+            "📋 Todos os Leads",
+        ])
+
+        # --- Pending tab ---
         with tab_pendentes:
-            df_pendentes = df[df['status'].isin(['NEW', 'AUDITED'])].copy()
-            
-            if not df_pendentes.empty:
-                leads_para_auditar = df_pendentes[df_pendentes['status'] == 'NEW'].to_dict('records')
-                
-                if len(leads_para_auditar) > 0:
-                    st.info(f"Existem {len(leads_para_auditar)} leads sem auditoria.")
-                    if st.button("🔎 Executar Auditoria Técnica e Calcular Scores"):
-                        from auditor import auditar_site_lead
-                        from database import update_lead_score
-                        
-                        barra = st.progress(0)
-                        for i, lead in enumerate(leads_para_auditar):
-                            dados_auditoria = auditar_site_lead(lead['url'])
-                            update_lead_score(lead['url'], dados_auditoria['score'], dados_auditoria['motivos'])
-                            barra.progress((i + 1) / len(leads_para_auditar))
+            pending_statuses = ["NEW", "AUDITED", "QUALIFIED"]
+            df_pendentes = df[df["status"].isin(pending_statuses)].copy()
+
+            if df_pendentes.empty:
+                st.info("Não há leads pendentes.")
+            else:
+                # Audit button
+                leads_new = df_pendentes[df_pendentes["status"] == "NEW"].to_dict("records")
+                if leads_new:
+                    st.info(f"{len(leads_new)} leads aguardando auditoria.")
+                    if st.button("🔎 Executar Auditoria Técnica"):
+                        bar = st.progress(0)
+                        for i, lead in enumerate(leads_new):
+                            resultado = auditar_site_lead(lead["url"])
+                            score = resultado.get("score", 0)
+                            motivos = resultado.get("motivos", "")
+
+                            # Save detailed audit
+                            checks = resultado.get("checks", {})
+                            audit_row = {
+                                "score": score,
+                                "motivos": motivos,
+                                "performance_time": checks.get("performance", {}).get("load_time", 0),
+                                "has_https": checks.get("security", {}).get("has_https", False),
+                                "has_viewport": checks.get("mobile", {}).get("has_viewport", False),
+                                "has_h1": checks.get("seo", {}).get("has_h1", False),
+                                "textos_principais": resultado.get("textos_principais", ""),
+                                "cor_detectada": resultado.get("cor_detectada", ""),
+                                "raw_data": resultado,
+                            }
+                            save_audit(lead["id"], audit_row)
+                            update_lead_score(lead["url"], score, motivos)
+                            bar.progress((i + 1) / len(leads_new))
+
                         st.success("Auditoria concluída!")
                         time.sleep(1)
                         st.rerun()
 
-                st.markdown("### Selecione os Alvos (Score baixo = Venda fácil)")
-                df_pendentes.insert(0, "Deploy", False) 
-                
-                cols = ["Deploy", "score", "motivos_score", "nome", "url"]
+                # Show pending leads
+                st.markdown("### Selecione Alvos")
+                df_pendentes.insert(0, "Deploy", False)
+
+                cols = ["Deploy", "score", "motivos_score", "nome", "url", "status"]
                 df_view = df_pendentes[[c for c in cols if c in df_pendentes.columns]]
-                
+
                 edited_df = st.data_editor(
                     df_view,
                     column_config={
                         "Deploy": st.column_config.CheckboxColumn("Atacar?"),
                         "score": st.column_config.NumberColumn("Score (0-100)"),
-                        "motivos_score": st.column_config.TextColumn("Falhas Encontradas"),
-                        "url": st.column_config.LinkColumn("Site Original")
+                        "motivos_score": st.column_config.TextColumn("Problemas"),
+                        "url": st.column_config.LinkColumn("Site"),
+                        "status": st.column_config.TextColumn("Status"),
                     },
                     hide_index=True,
-                    use_container_width=True
+                    use_container_width=True,
                 )
-                
-                leads_para_ataque = edited_df[edited_df["Deploy"] == True].to_dict('records')
-                
-                if st.button(f"🚀 Acionar Pipeline para {len(leads_para_ataque)} leads", type="primary", disabled=len(leads_para_ataque)==0):
-                    progress_bar = st.progress(0)
+
+                selected = edited_df[edited_df["Deploy"] == True].to_dict("records")
+
+                if st.button(
+                    f"🚀 Pipeline para {len(selected)} leads",
+                    type="primary",
+                    disabled=len(selected) == 0,
+                ):
+                    bar = st.progress(0)
                     status_text = st.empty()
-                    
-                    for i, lead in enumerate(leads_para_ataque):
-                        nome_cli = lead['nome']
-                        url_cli = lead['url']
-                        status_text.text(f"[PIPELINE] Gerando infraestrutura para: {nome_cli}...")
-                        
-                        # AGARRA O LINK AQUI
-                        link_vercel = executar_pipeline_completo(nome_cli, lead.get('nicho', 'Nicho'), lead.get('cidade', 'Cidade'), url_cli)
-                        
-                        # GUARDA O LINK NO BANCO
-                        update_lead_status(url_cli, 'DEPLOYED', vercel_url=link_vercel if link_vercel else '')
-                        
-                        progress_bar.progress((i + 1) / len(leads_para_ataque))
-                        
-                    st.success("[PIPELINE] Ciclo concluído.")
+
+                    for i, lead in enumerate(selected):
+                        nome = lead["nome"]
+                        url = lead["url"]
+                        status_text.text(f"Processando: {nome}...")
+
+                        link = executar_pipeline_completo(
+                            nome,
+                            lead.get("nicho", nicho or "Negócio"),
+                            lead.get("cidade", cidade or "Brasil"),
+                            url,
+                        )
+
+                        update_lead_status(url, "DEPLOYED", vercel_url=link if link else "")
+                        bar.progress((i + 1) / len(selected))
+
+                    st.success("Pipeline concluído!")
                     time.sleep(1.5)
                     st.rerun()
-            else:
-                st.info("Não há leads pendentes nesta fila.")
-                
+
+        # --- Completed tab ---
         with tab_concluidos:
-            # Mostra apenas os leads que já foram processados
-            df_concluidos = df[df['status'] == 'DEPLOYED'].copy()
-            if not df_concluidos.empty:
-                st.success(f"Você já gerou infraestrutura para {len(df_concluidos)} leads!")
-                
-                # PREPARA A COLUNA DO LINK VERCEL
-                cols_concluidos = ["nome", "nicho", "cidade", "vercel_url"]
-                df_view_concluidos = df_concluidos[[c for c in cols_concluidos if c in df_concluidos.columns]]
-                
-                st.dataframe(
-                    df_view_concluidos,
-                    column_config={
-                        "vercel_url": st.column_config.LinkColumn("🔥 Site Gerado (Vercel)")
-                    },
-                    use_container_width=True,
-                    hide_index=True
-                )
+            df_done = df[df["status"] == "DEPLOYED"].copy()
+            if df_done.empty:
+                st.info("Nenhum deploy concluído.")
             else:
-                st.info("Ainda não fez nenhum deploy com sucesso.")
-    else:
-        st.info("Database vazio. Inicie o Discovery Engine.")
+                st.success(f"{len(df_done)} sites gerados!")
+                cols = ["nome", "nicho", "cidade", "vercel_url"]
+                df_view = df_done[[c for c in cols if c in df_done.columns]]
+                st.dataframe(
+                    df_view,
+                    column_config={"vercel_url": st.column_config.LinkColumn("🔥 Site Gerado")},
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        # --- All leads tab ---
+        with tab_todos:
+            st.dataframe(
+                df[["nome", "url", "nicho", "cidade", "status", "score", "criado_em"]],
+                column_config={
+                    "url": st.column_config.LinkColumn("Site"),
+                    "score": st.column_config.NumberColumn("Score"),
+                },
+                use_container_width=True,
+                hide_index=True,
+            )

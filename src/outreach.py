@@ -1,64 +1,52 @@
-import os
-import json
-from google import genai
-from dotenv import load_dotenv
+"""
+Outreach — Generate personalized outreach messages based on REAL audit data.
+Never invents problems, clients, reviews, metrics, or certifications.
+"""
+import logging
 
-load_dotenv()
-API_KEY = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=API_KEY)
+from ai_service import ai
 
-def gerar_mensagem(nome_empresa: str, qualificacao: dict):
+logger = logging.getLogger(__name__)
+
+
+def gerar_mensagem(nome_empresa: str, qualificacao: dict, canal: str = "whatsapp") -> str:
     """
-    Transforma a análise técnica em uma mensagem comercial amigável e direta.
+    Generate a personalized outreach message based on real audit data.
+    Falls back to a template if AI is unavailable.
     """
-    print(f"✍️ Escrevendo mensagem personalizada para: {nome_empresa}...")
-    
-    # Extraímos os problemas da qualificação
-    problemas = qualificacao.get('main_problems', [])
-    motivo = qualificacao.get('reason', '')
-    
+    factors = qualificacao.get("factors", [])
+    opportunities = qualificacao.get("opportunities", [])
+    motivos = qualificacao.get("motivos", "")
+
+    # Build context from real data only
+    problemas_reais = ", ".join(factors[:3]) if factors else motivos
+    oportunidades_reais = ", ".join(opportunities[:3]) if opportunities else "melhorias na presença digital"
+
     prompt = f"""
-    Você é um desenvolvedor web. Escreva uma mensagem de prospecção curta e natural para o WhatsApp desta empresa.
+    Escreva uma mensagem de prospecção curta e natural para {canal} desta empresa.
     
     Empresa: {nome_empresa}
-    Problemas técnicos reais do site deles: {', '.join(problemas)}
-    Impacto: {motivo}
+    Problemas técnicos REAIS encontrados: {problemas_reais}
+    Oportunidades: {oportunidades_reais}
     
-    REGRAS DA MENSAGEM:
+    REGRAS:
     1. Seja educado, humano e direto.
-    2. NÃO pareça um robô ou vendedor agressivo. Sem spam.
-    3. Traduza os problemas técnicos (meta description, alt tag) para uma linguagem de negócios simples (ex: "estão perdendo visibilidade nas buscas locais").
-    4. Termine com uma pergunta leve para iniciar a conversa (ex: "Faz sentido batermos um papo rápido sobre isso?").
-    5. Retorne APENAS o texto da mensagem, sem aspas, sem formatação extra.
+    2. NÃO pareça robô ou vendedor agressivo.
+    3. Traduza problemas técnicos para linguagem de negócios (ex: "meta description" → "visibilidade nas buscas").
+    4. NUNCA invente clientes, avaliações, resultados, números, prêmios ou certificações.
+    5. Termine com uma pergunta leve para iniciar conversa.
+    6. Retorne APENAS o texto da mensagem, sem aspas, sem formatação extra.
+    7. Máximo 5 frases.
     """
-    
-    try:
-        response = client.models.generate_content(
-            model='gemini-3.8-flash',
-            contents=prompt,
-        )
-        return response.text.strip()
-        
-    except Exception as e:
-        print(f" ⚠️ IA Indisponível. Usando Fallback de template estático: {e}")
-        # Se a IA cair, usamos um template padrão preenchido com as variáveis
-        problemas_str = " e ".join(problemas[:2]) if problemas else "alguns detalhes técnicos"
-        return f"Olá, equipe da {nome_empresa}! Dei uma olhada no site de vocês e notei {problemas_str}. Isso pode estar prejudicando a captação de novos pacientes pelo Google. Vocês teriam interesse em ver como podemos corrigir isso?"
 
-if __name__ == "__main__":
-    # Vamos simular a passagem de dados usando exatamente o JSON que o seu terminal gerou
-    qualificacao_mock = {
-      "lead_score": 85,
-      "priority": "high",
-      "main_problems": [
-        "Falta de Meta Description",
-        "8 imagens da página sem texto alternativo (alt tag)"
-      ],
-      "reason": "Afeta diretamente a visibilidade nas buscas locais e a conversão de pacientes potenciais."
-    }
-    
-    mensagem = gerar_mensagem("Odontoclinic (Unidade Bragança Paulista)", qualificacao_mock)
-    
-    print("\n=== MENSAGEM DE PROSPECÇÃO GERADA ===")
-    print(mensagem)
-    print("======================================\n")
+    try:
+        return ai.generate_text(prompt, temperature=0.7)
+    except Exception as e:
+        logger.warning(f"AI indisponível para outreach: {e}")
+        # Template fallback with real data
+        problemas_str = " e ".join(factors[:2]) if factors else "alguns pontos técnicos"
+        return (
+            f"Olá, equipe da {nome_empresa}! Tudo bem?\n\n"
+            f"Dei uma olhada no site de vocês e notei {problemas_str} que podem estar impactando seus resultados.\n\n"
+            f"Teriam interesse em ver como podemos ajudar com isso?"
+        )

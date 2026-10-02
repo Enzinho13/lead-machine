@@ -1,46 +1,79 @@
+"""
+AI Qualifier — Uses audit data to produce explainable lead scoring and qualification.
+"""
+import sys
 import os
-import google.generativeai as genai
 
-# Configura a chave de API (garantindo que lê do ambiente)
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-def qualificar_lead_com_ia(dados_lead):
+from ai_service import ai
+
+
+def qualificar_lead_com_ia(dados_lead: dict) -> dict:
     """
-    Analisa o lead utilizando o Gemini com fallback automático e tratamento de erros 503.
+    Qualifies a lead based on real audit data.
+    Returns structured qualification with score, priority, and reasoning.
     """
-    # Lista de modelos em ordem de preferência (do mais recente para alternativas mais leves)
-    modelos_para_tentar = ['gemini-1.5-pro', 'gemini-1.5-flash']
-    
-    prompt = f"""
-    Analise o seguinte lead para uma agência de web design e SEO:
-    Empresa: {dados_lead.get('nome')}
-    Site: {dados_lead.get('url')}
-    Auditoria Técnica: {dados_lead.get('auditoria', 'Sem falhas críticas aparentes')}
-    
-    Retorne apenas se este lead é 'Quente', 'Morno' ou 'Frio' para uma abordagem de redesign de site, 
-    junto com uma justificativa curta de uma linha.
-    """
+    audit_data = dados_lead.get("auditoria", {})
+    checks = audit_data.get("checks", {}) if isinstance(audit_data, dict) else {}
 
-    for nome_modelo in modelos_para_tentar:
-        try:
-            # Usamos o modelo atual com chamadas diretas seguras
-            model = genai.GenerativeModel(nome_modelo)
-            response = model.generate_content(prompt)
-            
-            if response and response.text:
-                return {
-                    "status": "Sucesso",
-                    "qualificacao": response.text.strip(),
-                    "modelo_usado": nome_modelo
-                }
-        except Exception as e:
-            # Se der erro 503 ou qualquer outro, tenta o próximo modelo da lista
-            print(f"⚠️ Aviso com o modelo {nome_modelo}: {e}. Tentando alternativa...")
-            continue
+    # Deterministic scoring from audit data
+    score = audit_data.get("score", 50) if isinstance(audit_data, dict) else 50
+    motivos = audit_data.get("motivos", "") if isinstance(audit_data, dict) else ""
 
-    # Se todos falharem, aciona o fallback inteligente sem quebrar o código
+    # Build qualification factors
+    factors = []
+    opportunities = []
+
+    if isinstance(checks, dict):
+        perf = checks.get("performance", {})
+        if perf.get("load_time", 0) > 2.0:
+            factors.append(f"Site lento ({perf['load_time']}s)")
+            opportunities.append("Otimização de performance")
+
+        seo = checks.get("seo", {})
+        seo_issues = seo.get("issues", [])
+        if seo_issues:
+            factors.extend(seo_issues)
+            opportunities.append("Otimização SEO")
+
+        mobile = checks.get("mobile", {})
+        if not mobile.get("has_viewport", True):
+            factors.append("Não otimizado para mobile")
+            opportunities.append("Redesign responsivo")
+
+        security = checks.get("security", {})
+        if not security.get("has_https", True):
+            factors.append("Sem HTTPS")
+            opportunities.append("Certificado SSL")
+
+        images = checks.get("images", {})
+        if images.get("missing_alt", 0) > 0:
+            factors.append(f"{images['missing_alt']} imagens sem alt text")
+            opportunities.append("Otimização de imagens")
+
+        tech = checks.get("technology", {})
+        techs = tech.get("technologies", [])
+        if "WordPress" in techs:
+            opportunities.append("Modernização da plataforma")
+
+    # Priority based on score
+    if score <= 40:
+        priority = "high"
+        qualificacao = "Quente"
+    elif score <= 70:
+        priority = "medium"
+        qualificacao = "Morno"
+    else:
+        priority = "low"
+        qualificacao = "Frio"
+
     return {
-        "status": "Fallback",
-        "qualificacao": "Lead qualificado automaticamente via regra de contingência (Alta Prioridade para Abordagem)",
-        "modelo_usado": "Nenhum (Fallback Local)"
+        "status": "Sucesso",
+        "qualificacao": qualificacao,
+        "priority": priority,
+        "score": score,
+        "factors": factors,
+        "opportunities": opportunities,
+        "motivos": motivos,
     }
