@@ -133,7 +133,7 @@ with col2:
                         "status": st.column_config.TextColumn("Status"),
                     },
                     hide_index=True,
-                    use_container_width=True,
+                    width='stretch',
                 )
 
                 selected = edited_df[edited_df["Deploy"] == True].to_dict("records")
@@ -177,7 +177,7 @@ with col2:
                 st.dataframe(
                     df_view,
                     column_config={"vercel_url": st.column_config.LinkColumn("🔥 Site Gerado")},
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True,
                 )
 
@@ -189,6 +189,6 @@ with col2:
                     "url": st.column_config.LinkColumn("Site"),
                     "score": st.column_config.NumberColumn("Score"),
                 },
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
