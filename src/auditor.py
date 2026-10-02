@@ -2,76 +2,72 @@ import requests
 import time
 from bs4 import BeautifulSoup
 
+class AuditEngine:
+    def __init__(self, url):
+        self.url = url
+        self.soup = None
+        self.load_time = 0
+
+    def fetch(self):
+        try:
+            start = time.time()
+            res = requests.get(self.url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=8)
+            self.load_time = round(time.time() - start, 2)
+            if res.status_code == 200:
+                self.soup = BeautifulSoup(res.text, 'html.parser')
+                return True
+        except:
+            pass
+        return False
+
+    def check_performance(self):
+        if self.load_time > 3.0: return -30, f"Muito Lento ({self.load_time}s)"
+        if self.load_time > 1.5: return -10, f"Lento ({self.load_time}s)"
+        return 0, ""
+
+    def check_security(self):
+        return (-20, "Sem HTTPS") if not self.url.startswith("https") else (0, "")
+
+    def check_mobile(self):
+        if self.soup and not self.soup.find('meta', attrs={'name': 'viewport'}):
+            return -40, "Não otimizado para Mobile"
+        return 0, ""
+
+    def check_seo(self):
+        if self.soup and not self.soup.find('h1'):
+            return -10, "SEO Fraco (Sem H1)"
+        return 0, ""
+
+    def extract_data(self):
+        if not self.soup: return "", None
+        theme = self.soup.find('meta', attrs={'name': 'theme-color'})
+        cor = theme['content'] if theme else None
+        textos = [el.get_text(strip=True) for t in ['title', 'h1', 'h2', 'p'] 
+                  for el in self.soup.find_all(t, limit=3) if len(el.get_text(strip=True)) > 15]
+        return " | ".join(textos)[:1500], cor
+
 def auditar_site_lead(url: str) -> dict:
-    if not url or url == "#" or not url.startswith("http"):
-        return {"status": "Invalido", "score": 0, "motivos": "Sem site", "textos_principais": ""}
+    if not url or not url.startswith("http"):
+        return {"status": "Invalido", "score": 0, "motivos": "Sem URL", "textos_principais": ""}
     
-    print(f"[AUDITOR] Executando diagnóstico técnico em: {url}")
+    engine = AuditEngine(url)
+    if not engine.fetch():
+        return {"status": "Offline", "score": 0, "motivos": "Fora do Ar", "textos_principais": ""}
     
     score = 100
-    motivos_penalizacao = []
+    motivos = []
     
-    try:
-        start_time = time.time()
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        response = requests.get(url, headers=headers, timeout=10)
-        tempo_resposta = round(time.time() - start_time, 2)
-        
-        # 1. Análise de Performance
-        if tempo_resposta > 3.0:
-            score -= 30
-            motivos_penalizacao.append(f"Muito Lento ({tempo_resposta}s)")
-        elif tempo_resposta > 1.5:
-            score -= 10
-            motivos_penalizacao.append(f"Lento ({tempo_resposta}s)")
+    for penalty, reason in [engine.check_performance(), engine.check_security(), engine.check_mobile(), engine.check_seo()]:
+        if penalty < 0:
+            score += penalty
+            motivos.append(reason)
             
-        # 2. Análise de Segurança
-        if not url.startswith("https"):
-            score -= 20
-            motivos_penalizacao.append("Inseguro (Sem HTTPS)")
-            
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # 3. Análise Mobile (Viewport)
-            viewport = soup.find('meta', attrs={'name': 'viewport'})
-            if not viewport:
-                score -= 40
-                motivos_penalizacao.append("Não otimizado para Mobile")
-                
-            # 4. Análise SEO Básica
-            if not soup.find('h1'):
-                score -= 10
-                motivos_penalizacao.append("SEO Fraco (Sem H1)")
-                
-            # Extração de Cores e Textos (Para a IA)
-            theme_color = soup.find('meta', attrs={'name': 'theme-color'})
-            cor_detectada = theme_color['content'] if theme_color else None
-            
-            textos = []
-            for tag in ['title', 'h1', 'h2', 'p']:
-                for el in soup.find_all(tag, limit=3):
-                    texto = el.get_text(strip=True)
-                    if len(texto) > 15:
-                        textos.append(texto)
-                        
-            resumo_textual = " | ".join(textos)[:1500] 
-            
-            # Limites de score
-            score = max(0, score)
-            motivos_finais = ", ".join(motivos_penalizacao) if motivos_penalizacao else "Site Excelente"
-            
-            print(f"[AUDITOR] Concluído. Score: {score}/100. Problemas: {motivos_finais}")
-            return {
-                "status": "Sucesso",
-                "score": score,
-                "motivos": motivos_finais,
-                "cor_detectada": cor_detectada,
-                "textos_principais": resumo_textual
-            }
-        else:
-            return {"status": "Erro HTTP", "score": 10, "motivos": f"Erro {response.status_code}", "textos_principais": ""}
-            
-    except Exception as e:
-        print(f"[AUDITOR WARNING] Site fora do ar ou bloqueado: {url}")
-        return {"status": "Offline", "score": 0, "motivos": "Site Fora do Ar", "textos_principais": ""}
+    textos, cor = engine.extract_data()
+    
+    return {
+        "status": "Sucesso",
+        "score": max(0, score),
+        "motivos": ", ".join(motivos) if motivos else "Excelente",
+        "textos_principais": textos,
+        "cor_detectada": cor
+    }
