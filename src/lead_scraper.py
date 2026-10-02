@@ -1,40 +1,52 @@
 from ddgs import DDGS
+import os
+import sys
 
-def buscar_empresas(termo_busca: str, max_resultados: int = 5):
-    """
-    Busca potenciais clientes diretamente em motores de busca,
-    simulando como um usuário normal procuraria por serviços.
-    """
-    print(f"Buscando leads para: '{termo_busca}' (aguarde)...")
+# Garante que o database pode ser importado corretamente
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from database import init_db, insert_lead
+
+# REGRA DE NEGÓCIO: Domínios proibidos (Diretórios, Redes Sociais, Agregadores)
+BANNED_DOMAINS = [
+    "instagram.com", "facebook.com", "linkedin.com", "youtube.com",
+    "jusbrasil.com.br", "guiamais.com.br", "listamais.com.br", 
+    "doctoralia.com.br", "guiatelefone.com", "telelistas.net",
+    "yelp.com", "tripadvisor.com", "comerciosaopaulo.com.br"
+]
+
+def buscar_empresas(nicho: str, cidade: str, max_resultados: int = 5):
+    print(f"[DISCOVERY] Iniciando busca por '{nicho} em {cidade}'...")
+    init_db() # Garante que o banco SQLite existe
     
-    empresas = []
+    termo_busca = f"{nicho} em {cidade}"
+    leads_encontrados = 0
+    
     try:
-        # Inicializa o buscador com a nova biblioteca
         with DDGS() as ddgs:
-            resultados = list(ddgs.text(termo_busca, max_results=max_resultados))
+            # Buscamos o triplo de resultados para compensar os lixos que vamos descartar
+            resultados = list(ddgs.text(termo_busca, max_results=max_resultados * 3)) 
             
             for r in resultados:
-                site_url = r.get('href', '')
-                
-                # Removemos redes sociais para focar apenas em sites próprios
-                if site_url and "instagram.com" not in site_url and "facebook.com" not in site_url:
-                    empresas.append({
-                        "titulo": r.get('title', 'Sem título'),
-                        "site": site_url,
-                        "descricao": r.get('body', 'Sem descrição')
-                    })
+                if leads_encontrados >= max_resultados:
+                    break # Atingimos a meta solicitada pelo usuário
                     
-        return empresas
-        
+                site_url = r.get('href', '').lower()
+                
+                # CRAWLER: Validação de Lixo
+                is_banned = any(banned in site_url for banned in BANNED_DOMAINS)
+                
+                if site_url and not is_banned:
+                    nome = r.get('title', 'Sem título')
+                    descricao = r.get('body', 'Sem descrição')
+                    
+                    # CRAWLER: Limpeza primária de SEO Titles
+                    nome_limpo = nome.split(" - ")[0].split(" | ")[0]
+                    
+                    # DATA EXTRACTION: Salva no SQLite
+                    insert_lead(nome_limpo, site_url, descricao, nicho, cidade)
+                    leads_encontrados += 1
+                    
     except Exception as e:
-        print(f"Erro na requisição: {e}")
-        return []
-
-if __name__ == "__main__":
-    leads = buscar_empresas("clínica odontológica Bragança Paulista", 5)
+        print(f"[ERROR] Falha na camada de Discovery: {e}")
     
-    print(f"\nEncontramos {len(leads)} sites reais para auditar:\n")
-    for lead in leads:
-        print(f"Empresa: {lead['titulo']}")
-        print(f"Site: {lead['site']}")
-        print("-" * 50)
+    print(f"[DISCOVERY] Concluído. {leads_encontrados} leads salvos/ignorados (duplicados barrados).")

@@ -1,45 +1,15 @@
 ==================================================
-🏢 CLIENTE: Odontoclinic
+🏢 CLIENTE: Advocacia Rossi
 ==================================================
-Olá, equipa da Odontoclinic! Tudo bem?
+Olá, equipe da Advocacia Rossi! Tudo bem?
 
-Dei uma vista de olhos na presença digital da vossa clínica e notei oportunidades de melhoria, principalmente na versão mobile.
+Fiz uma auditoria técnica no site atual de vocês e identifiquei oportunidades claras de melhoria no design e conversão.
 
-Como sou especialista em web design para o vosso setor, adiantei-me e montei um protótipo de alta performance com um design muito mais premium.
+Como especialista no setor, montei um protótipo de alta performance respeitando a identidade da marca, mas com uma arquitetura editorial premium.
 
-Vejam como ficou a nova estrutura (já está no ar para testarem no telemóvel):
-👉 https://odontoclinic-4476ixhp1-enzinhogab14-3850.vercel.app
+Vejam a diferença:
+👉 https://advocacia-rossi-5wgad0nnx-enzinhogab14-3850.vercel.app
 
-O que acham de falarmos rapidamente sobre como um site deste nível pode multiplicar os vossos agendamentos?
-
-
-==================================================
-🏢 CLIENTE: Brag Dentes
-==================================================
-Olá, equipa da Brag Dentes! Tudo bem?
-
-Dei uma vista de olhos na presença digital da vossa clínica e notei oportunidades de melhoria, principalmente na versão mobile.
-
-Como sou especialista em web design para o vosso setor, adiantei-me e montei um protótipo de alta performance com um design muito mais premium.
-
-Vejam como ficou a nova estrutura (já está no ar para testarem no telemóvel):
-👉 https://brag-dentes-4li2rh8ub-enzinhogab14-3850.vercel.app
-
-O que acham de falarmos rapidamente sobre como um site deste nível pode multiplicar os vossos agendamentos?
-
-
-==================================================
-🏢 CLIENTE: Odontoclinic
-==================================================
-Olá, equipa da Odontoclinic! Tudo bem?
-
-Dei uma vista de olhos na presença digital da vossa clínica e notei oportunidades de melhoria, principalmente na versão mobile.
-
-Como sou especialista em web design para o vosso setor, adiantei-me e montei um protótipo de alta performance com um design muito mais premium.
-
-Vejam como ficou a nova estrutura (já está no ar para testarem no telemóvel):
-👉 https://odontoclinic-l3jbioxfa-enzinhogab14-3850.vercel.app
-
-O que acham de falarmos rapidamente sobre como um site deste nível pode multiplicar os vossos agendamentos?
+Gostariam de agendar 10 minutos para falarmos sobre como esta estrutura pode aumentar os vossos contactos diários?
 
 

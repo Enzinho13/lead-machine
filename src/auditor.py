@@ -1,90 +1,77 @@
 import requests
+import time
 from bs4 import BeautifulSoup
 
-def auditar_site(url: str):
-    """
-    Baixa o HTML do site e procura problemas estruturais reais
-    para usarmos na nossa abordagem de vendas.
-    """
-    print(f"Inspecionando o código de: {url} ...")
+def auditar_site_lead(url: str) -> dict:
+    if not url or url == "#" or not url.startswith("http"):
+        return {"status": "Invalido", "score": 0, "motivos": "Sem site", "textos_principais": ""}
     
-    # Nos disfarçamos de navegador comum para o site não nos bloquear
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    print(f"[AUDITOR] Executando diagnóstico técnico em: {url}")
+    
+    score = 100
+    motivos_penalizacao = []
     
     try:
-        # Pede a página com limite de 10 segundos para não travar nosso sistema
-        resposta = requests.get(url, headers=headers, timeout=10)
-        resposta.raise_for_status()
+        start_time = time.time()
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        response = requests.get(url, headers=headers, timeout=10)
+        tempo_resposta = round(time.time() - start_time, 2)
         
-        # O BeautifulSoup transforma o texto do site em algo que o Python entende
-        soup = BeautifulSoup(resposta.text, 'html.parser')
-        
-        problemas = []
-        oportunidades = []
-        
-        # 1. VERIFICAÇÃO DE MOBILE (Viewport)
-        viewport = soup.find("meta", attrs={"name": "viewport"})
-        if not viewport:
-            problemas.append("Site antigo, sem tag de responsividade (Não otimizado para celular).")
+        # 1. Análise de Performance
+        if tempo_resposta > 3.0:
+            score -= 30
+            motivos_penalizacao.append(f"Muito Lento ({tempo_resposta}s)")
+        elif tempo_resposta > 1.5:
+            score -= 10
+            motivos_penalizacao.append(f"Lento ({tempo_resposta}s)")
             
-        # 2. VERIFICAÇÃO DE SEO BÁSICO (Title e Description)
-        title = soup.title.string if soup.title else None
-        if not title:
-            problemas.append("Site não possui tag de Título (Péssimo para o Google).")
+        # 2. Análise de Segurança
+        if not url.startswith("https"):
+            score -= 20
+            motivos_penalizacao.append("Inseguro (Sem HTTPS)")
             
-        meta_desc = soup.find("meta", attrs={"name": "description"})
-        if not meta_desc:
-            problemas.append("Falta a Meta Description (Baixa taxa de clique no Google).")
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
             
-        # 3. VERIFICAÇÃO DE ACESSIBILIDADE E SEO DE IMAGENS (Alt Text)
-        imagens = soup.find_all("img")
-        imagens_sem_alt = [img for img in imagens if not img.get("alt")]
-        
-        if len(imagens_sem_alt) > 0:
-            problemas.append(f"{len(imagens_sem_alt)} imagens sem atributo 'alt' (Prejudica acessibilidade e SEO).")
+            # 3. Análise Mobile (Viewport)
+            viewport = soup.find('meta', attrs={'name': 'viewport'})
+            if not viewport:
+                score -= 40
+                motivos_penalizacao.append("Não otimizado para Mobile")
+                
+            # 4. Análise SEO Básica
+            if not soup.find('h1'):
+                score -= 10
+                motivos_penalizacao.append("SEO Fraco (Sem H1)")
+                
+            # Extração de Cores e Textos (Para a IA)
+            theme_color = soup.find('meta', attrs={'name': 'theme-color'})
+            cor_detectada = theme_color['content'] if theme_color else None
             
-        # 4. VERIFICAÇÃO DE H1 (Título principal da página)
-        h1_tags = soup.find_all("h1")
-        if len(h1_tags) == 0:
-            problemas.append("A página principal não possui a tag H1 (Falta hierarquia de texto).")
-        elif len(h1_tags) > 1:
-            oportunidades.append(f"A página tem {len(h1_tags)} tags H1. O ideal é ter apenas uma bem definida.")
+            textos = []
+            for tag in ['title', 'h1', 'h2', 'p']:
+                for el in soup.find_all(tag, limit=3):
+                    texto = el.get_text(strip=True)
+                    if len(texto) > 15:
+                        textos.append(texto)
+                        
+            resumo_textual = " | ".join(textos)[:1500] 
             
-        return {
-            "url": url,
-            "total_imagens": len(imagens),
-            "problemas": problemas,
-            "oportunidades": oportunidades
-        }
-        
-    except requests.exceptions.RequestException as e:
-        print(f"Erro ao acessar o site: {e}")
-        return None
-
-if __name__ == "__main__":
-    # Testando com a mesma URL que falhou antes
-    site_teste = "https://odontoclinic.com.br/unidades/braganca-paulista/"
-    
-    resultado = auditar_site(site_teste)
-    
-    if resultado:
-        print("\n=== RELATÓRIO DA AUDITORIA INTERNA ===")
-        print(f"URL: {resultado['url']}")
-        
-        print("\nPROBLEMAS ENCONTRADOS:")
-        if resultado['problemas']:
-            for p in resultado['problemas']:
-                print(f" ❌ {p}")
+            # Limites de score
+            score = max(0, score)
+            motivos_finais = ", ".join(motivos_penalizacao) if motivos_penalizacao else "Site Excelente"
+            
+            print(f"[AUDITOR] Concluído. Score: {score}/100. Problemas: {motivos_finais}")
+            return {
+                "status": "Sucesso",
+                "score": score,
+                "motivos": motivos_finais,
+                "cor_detectada": cor_detectada,
+                "textos_principais": resumo_textual
+            }
         else:
-            print(" ✅ Nenhum problema crítico encontrado.")
+            return {"status": "Erro HTTP", "score": 10, "motivos": f"Erro {response.status_code}", "textos_principais": ""}
             
-        print("\nOPORTUNIDADES DE MELHORIA:")
-        if resultado['oportunidades']:
-            for o in resultado['oportunidades']:
-                print(f" 💡 {o}")
-        else:
-            print(" - Nenhuma oportunidade extra destacada.")
-            
-        print("======================================\n")
+    except Exception as e:
+        print(f"[AUDITOR WARNING] Site fora do ar ou bloqueado: {url}")
+        return {"status": "Offline", "score": 0, "motivos": "Site Fora do Ar", "textos_principais": ""}
