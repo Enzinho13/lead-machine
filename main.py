@@ -33,25 +33,7 @@ def criar_slug_seguro(nome: str) -> str:
     return re.sub(r"\s+", "-", slug).strip("-")[:50]
 
 
-def gerar_outreach_personalizado(nome_cliente: str, url_online: str, dados_auditoria: dict) -> str:
-    """Generate outreach message based on REAL audit data. Never invent problems."""
-    motivos = dados_auditoria.get("motivos", "")
-
-    # Only mention real issues found
-    if motivos and motivos != "Nenhum problema crítico":
-        problemas_texto = f"identificamos alguns pontos técnicos que podem estar impactando seus resultados: {motivos}"
-    else:
-        problemas_texto = "identificamos oportunidades de melhoria na presença digital de vocês"
-
-    mensagem = (
-        f"Olá, equipe da {nome_cliente}! Tudo bem?\n\n"
-        f"Fizemos uma análise técnica no site de vocês e {problemas_texto}.\n\n"
-        f"Montamos um protótipo de como ficaria um site otimizado para conversão:\n"
-        f"👉 {url_online}\n\n"
-        f"Gostariam de agendar 10 minutos para conversarmos sobre isso?\n"
-    )
-
-    return mensagem
+# Outreach is now handled via OutreachEngine
 
 
 def executar_pipeline_completo(nome_bruto: str, nicho: str, cidade: str, url_lead: str) -> str | None:
@@ -93,9 +75,27 @@ def executar_pipeline_completo(nome_bruto: str, nicho: str, cidade: str, url_lea
 
     # 6. Outreach
     if url_online:
-        msg = gerar_outreach_personalizado(nome_limpo, url_online, dados_auditoria)
-        brief = dados_ia.get("design_brief", "")
-        save_outreach_data(url_lead, msg, brief)
-        logger.info(f"[PIPELINE] Concluído: {url_online}")
+        from database import get_lead_by_url, DB_PATH
+        from ai_qualifier import qualificar_lead_com_ia
+        from outreach import OutreachEngine
+        
+        lead_db = get_lead_by_url(url_lead)
+        if lead_db:
+            qual = qualificar_lead_com_ia({"auditoria": dados_auditoria})
+            engine = OutreachEngine(DB_PATH)
+            
+            # Use real AI generated outreach with real audit context
+            result = engine.dispatch(lead_db['id'], nome_limpo, qual, canal="whatsapp")
+            
+            if result.get("status") == "success":
+                msg = result["message"]
+                # Append prototype link to generated AI message
+                msg += f"\n\nVeja o protótipo: {url_online}"
+                
+                brief = dados_ia.get("design_brief", "")
+                save_outreach_data(url_lead, msg, brief)
+                logger.info(f"[PIPELINE] Outreach Gerado: {url_online}")
+            else:
+                logger.warning(f"[PIPELINE] Outreach bloqueado: {result.get('reason')}")
 
     return url_online
