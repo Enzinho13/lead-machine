@@ -3,9 +3,20 @@ SEO Optimizer — Generates metadata, schema.json, and SEO-optimized content for
 """
 import logging
 from typing import Dict, Any, List
-from ai_service import ai
+from ai_service import ai, AIError, AIResponseError
 
 logger = logging.getLogger(__name__)
+
+def _seo_valido(result: Dict[str, Any]) -> bool:
+    """Exige o mínimo que o site usa: meta_title e meta_description textuais; keywords lista; schema_json objeto."""
+    for campo in ("meta_title", "meta_description"):
+        valor = result.get(campo)
+        if not isinstance(valor, str) or not valor.strip():
+            return False
+    if not isinstance(result.get("keywords", []), list):
+        return False
+    return isinstance(result.get("schema_json", {}), dict)
+
 
 class SEOOptimizer:
     def generate_seo_package(self, lead_data: Dict[str, Any], design_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -47,6 +58,8 @@ class SEOOptimizer:
         try:
             logger.info(f"[SEO] Gerando pacote para {nome}...")
             result = ai.generate_structured(prompt, schema_hint=schema)
+            if not _seo_valido(result):
+                raise AIResponseError("Pacote de SEO inválido: faltam meta_title/meta_description ou os tipos estão errados.")
             
             # Ensure schema_json always has required fields (AI sometimes returns empty)
             sj = result.get("schema_json", {})
@@ -60,9 +73,10 @@ class SEOOptimizer:
                 sj["address"] = {"@type": "PostalAddress", "addressLocality": cidade}
             result["schema_json"] = sj
             return result
-        except Exception as e:
+        except AIError as e:
             logger.error(f"[SEO] Falha ao gerar pacote: {e}")
             return {
+                "ai_fallback": True,
                 "meta_title": f"{nome} | {nicho} em {cidade}",
                 "meta_description": f"Conheça a {nome}, especialista em {nicho} atendendo toda a região de {cidade}. Qualidade e confiança para você.",
                 "keywords": [nicho, cidade, nome],

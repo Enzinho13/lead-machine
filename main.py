@@ -48,6 +48,10 @@ def executar_pipeline_completo(nome_bruto: str, nicho: str, cidade: str, url_lea
     director = DesignDirector()
     dados_ia = director.generate_design(lead_data, dados_auditoria)
 
+    if dados_ia.get("ai_fallback"):
+        logger.error(f"[PIPELINE] IA indisponível no Design Director para {url_lead}. Pipeline cancelado: nenhum site genérico será gerado ou publicado.")
+        return None
+
     nome_limpo = dados_ia.get("nome_limpo", nome_bruto[:30])
     slug = criar_slug_seguro(nome_limpo)
 

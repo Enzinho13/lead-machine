@@ -1,9 +1,28 @@
 import logging
 from typing import Dict, Any
 
-from ai_service import ai
+from ai_service import ai, AIError, AIResponseError
 
 logger = logging.getLogger(__name__)
+
+def _design_valido(resultado: Dict[str, Any]) -> bool:
+    """Uma resposta só é aceita se der para montar um site com ela."""
+    layout = resultado.get("layout")
+    if not isinstance(layout, list) or not layout:
+        return False
+    for componente in layout:
+        if not isinstance(componente, dict) or not isinstance(componente.get("type"), str):
+            return False
+        if not isinstance(componente.get("props", {}), dict):
+            return False
+    if not isinstance(resultado.get("theme", {}), dict):
+        return False
+    if "nome_limpo" in resultado:
+        nome = resultado["nome_limpo"]
+        if not isinstance(nome, str) or not nome.strip():
+            return False
+    return True
+
 
 class DesignDirector:
     def generate_design(self, lead_data: Dict[str, Any], audit_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -85,11 +104,15 @@ class DesignDirector:
         }
 
         try:
-            return ai.generate_structured(prompt, schema_hint=schema)
-        except Exception as e:
+            resultado = ai.generate_structured(prompt, schema_hint=schema)
+            if not _design_valido(resultado):
+                raise AIResponseError("Design Director devolveu layout/tema/nome inválido ou vazio.")
+            return resultado
+        except AIError as e:
             logger.error(f"[AI] Falha no Design Director: {e}")
-            # Fallback
+            # Fallback: marcado com ai_fallback=True para o pipeline não publicar um site genérico
             return {
+                "ai_fallback": True,
                 "nome_limpo": nome_bruto,
                 "slogan": f"{nome_bruto} — {nicho}",
                 "subtitulo": f"Atendimento especializado em {cidade}.",
@@ -117,10 +140,9 @@ class DesignDirector:
                         }
                     },
                     {
-                        "type": "FooterStandard",
+                        "type": "FooterMinimal",
                         "props": {
-                            "company_name": nome_bruto,
-                            "contact": f"contato@{nome_bruto.lower().replace(' ', '')}.com"
+                            "text": f"© {nome_bruto}"
                         }
                     }
                 ]

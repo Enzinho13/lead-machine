@@ -7,7 +7,7 @@ import sqlite3
 import time
 from typing import Dict, Any, List
 
-from ai_service import ai
+from ai_service import ai, AIError
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,10 @@ class OutreachEngine:
         _rate_limits.setdefault(channel, []).append(time.time())
 
     def generate_message(self, nome_empresa: str, qualificacao: dict, canal: str = "whatsapp") -> str:
+        """Retorna só o texto da mensagem (IA ou template). Para saber qual foi usado, veja generate_message_with_status."""
+        return self.generate_message_with_status(nome_empresa, qualificacao, canal)[0]
+
+    def generate_message_with_status(self, nome_empresa: str, qualificacao: dict, canal: str = "whatsapp") -> tuple[str, bool]:
         """
         Generate a personalized outreach message based on real audit data.
         Falls back to a template if AI is unavailable.
@@ -73,15 +77,15 @@ class OutreachEngine:
         """
 
         try:
-            return ai.generate_text(prompt, temperature=0.7)
-        except Exception as e:
-            logger.warning(f"AI indisponível para outreach: {e}")
+            return ai.generate_text(prompt, temperature=0.7), False
+        except AIError as e:
+            logger.warning(f"AI indisponível para outreach, usando template de fallback: {e}")
             problemas_str = " e ".join(factors[:2]) if factors else "alguns pontos técnicos"
             return (
                 f"Olá, equipe da {nome_empresa}! Tudo bem?\n\n"
                 f"Dei uma olhada no site de vocês e notei {problemas_str} que podem estar impactando seus resultados.\n\n"
                 f"Teriam interesse em ver como podemos ajudar com isso?"
-            )
+            ), True
 
     def dispatch(self, lead_id: int, nome_empresa: str, qualificacao: dict, canal: str = "whatsapp") -> Dict[str, Any]:
         """Orchestrates message generation, validation, and simulated dispatch."""
@@ -91,7 +95,7 @@ class OutreachEngine:
         if self.is_rate_limited(canal):
             return {"status": "rate_limited", "reason": "Too many messages sent recently on this channel."}
             
-        msg = self.generate_message(nome_empresa, qualificacao, canal)
+        msg, used_fallback = self.generate_message_with_status(nome_empresa, qualificacao, canal)
         self.record_dispatch(canal)
         
         # Save to DB history
@@ -101,7 +105,7 @@ class OutreachEngine:
                       (lead_id, canal.upper(), msg))
             conn.commit()
             
-        return {"status": "success", "message": msg}
+        return {"status": "success", "message": msg, "used_fallback": used_fallback}
 
 
 # Backward compatibility wrapper
