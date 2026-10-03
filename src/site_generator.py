@@ -273,10 +273,18 @@ def gerar_site_cliente(dados_site):
     keywords = ", ".join(seo.get('keywords', []))
     schema_json = json.dumps(seo.get('schema_json', {}), indent=2)
     
+    
+    # Dynamic Google Fonts import
+    font_families = set()
+    for key in ('font_heading', 'font_body'):
+        font = theme.get(key, '')
+        if font and font not in ('serif', 'sans-serif', 'monospace', 'cursive', 'fantasy'):
+            font_families.add(font)
+    
     font_imports = ""
-    # Add some default Google Fonts if they are typical ones
-    if theme.get('font_heading') == 'Playfair Display' or theme.get('font_body') == 'Inter':
-        font_imports = "<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap' rel='stylesheet'>"
+    if font_families:
+        families_param = "&family=".join(f.replace(' ', '+') + ":wght@400;600;700" for f in sorted(font_families))
+        font_imports = f"<link href='https://fonts.googleapis.com/css2?family={families_param}&display=swap' rel='stylesheet'>"
     
     html_content = f"""<!DOCTYPE html>
 <html lang="pt-BR">

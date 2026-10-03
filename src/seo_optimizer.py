@@ -26,7 +26,7 @@ class SEOOptimizer:
         1. Meta Title deve ter entre 50-60 caracteres, incluindo a cidade.
         2. Meta Description deve ter entre 140-160 caracteres, persuasiva e com CTA.
         3. Gere 5 palavras-chave foco.
-        4. Gere um objeto JSON-LD (Schema.org) do tipo 'LocalBusiness' ou similar adequado ao nicho.
+        4. O campo "schema_json" DEVE ser um objeto JSON-LD Schema.org COMPLETO com "@context": "https://schema.org" e "@type" (use "LocalBusiness" ou tipo adequado ao nicho). Inclua "name", "address" com addressLocality.
         5. NÃO invente telefones ou endereços específicos se não fornecidos. Use placeholders genéricos como "Atendimento em {cidade}".
         
         Retorne um JSON puro.
@@ -38,7 +38,7 @@ class SEOOptimizer:
                 "meta_title": {"type": "string"},
                 "meta_description": {"type": "string"},
                 "keywords": {"type": "array", "items": {"type": "string"}},
-                "schema_json": {"type": "object", "description": "Objeto JSON-LD"},
+                "schema_json": {"type": "object", "description": "Objeto JSON-LD Schema.org completo. DEVE conter @context e @type."},
                 "seo_slugs": {"type": "array", "items": {"type": "string"}, "description": "Sugestões de slugs para páginas secundárias"}
             },
             "required": ["meta_title", "meta_description", "keywords", "schema_json"]
@@ -46,7 +46,20 @@ class SEOOptimizer:
         
         try:
             logger.info(f"[SEO] Gerando pacote para {nome}...")
-            return ai.generate_structured(prompt, schema_hint=schema)
+            result = ai.generate_structured(prompt, schema_hint=schema)
+            
+            # Ensure schema_json always has required fields (AI sometimes returns empty)
+            sj = result.get("schema_json", {})
+            if not sj.get("@context"):
+                sj["@context"] = "https://schema.org"
+            if not sj.get("@type"):
+                sj["@type"] = "LocalBusiness"
+            if not sj.get("name"):
+                sj["name"] = nome
+            if not sj.get("address"):
+                sj["address"] = {"@type": "PostalAddress", "addressLocality": cidade}
+            result["schema_json"] = sj
+            return result
         except Exception as e:
             logger.error(f"[SEO] Falha ao gerar pacote: {e}")
             return {
