@@ -20,6 +20,7 @@ from deployer import fazer_deploy_site
 from design_director import DesignDirector
 from qa_engine import executar_qa
 from site_generator import gerar_site_cliente
+from seo_optimizer import otimizar_seo
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def criar_slug_seguro(nome: str) -> str:
 
 
 def executar_pipeline_completo(nome_bruto: str, nicho: str, cidade: str, url_lead: str) -> str | None:
-    """Execute the full pipeline: Audit → Design Director → Generate → QA → Deploy → Outreach."""
+    """Execute the full pipeline: Audit → Design Director → SEO → Generate → QA → Deploy → Outreach."""
     # 1. Audit
     logger.info(f"[PIPELINE] Auditando: {url_lead}")
     dados_auditoria = auditar_site_lead(url_lead)
@@ -50,26 +51,31 @@ def executar_pipeline_completo(nome_bruto: str, nicho: str, cidade: str, url_lea
     nome_limpo = dados_ia.get("nome_limpo", nome_bruto[:30])
     slug = criar_slug_seguro(nome_limpo)
 
-    # 3. Prepare site data
+    # 3. SEO Optimization
+    logger.info(f"[PIPELINE] Otimizando SEO e Conteúdo para: {nome_limpo}")
+    dados_seo = otimizar_seo(lead_data, dados_ia)
+
+    # 4. Prepare site data
     dados_site = {
         "slug": slug,
         "title": nome_limpo,
         "theme": dados_ia.get("theme", {"font_heading": "serif", "font_body": "sans-serif", "primary_color": "#000000"}),
-        "layout": dados_ia.get("layout", [])
+        "layout": dados_ia.get("layout", []),
+        "seo": dados_seo
     }
 
-    # 4. Generate site
+    # 5. Generate site
     logger.info(f"[PIPELINE] Gerando site dinâmico: {nome_limpo}")
     gerar_site_cliente(dados_site)
 
-    # 4.5. QA Automation
+    # 5.5. QA Automation
     logger.info(f"[PIPELINE] Executando QA Automático: {slug}")
     qa_passed = executar_qa(slug)
     if not qa_passed:
         logger.error(f"[PIPELINE] Falha no QA para {slug}. Deploy cancelado.")
         return None
 
-    # 5. Deploy
+    # 6. Deploy
     logger.info(f"[PIPELINE] Deploy: {slug}")
     url_online = fazer_deploy_site(slug)
 

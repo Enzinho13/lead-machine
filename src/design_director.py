@@ -70,11 +70,11 @@ class DesignDirector:
                         "properties": {
                             "type": {
                                 "type": "string", 
-                                "enum": ["HeroMinimalist", "HeroEditorial", "HeroSplit", "GridServices", "ListServices", "FeatureServices", "AboutEditorial", "FooterMinimal", "FooterStandard"]
+                                "enum": ["HeroMinimalist", "HeroEditorial", "HeroSplit", "GridServices", "ListServices", "FeatureServices", "AboutEditorial", "PricingTable", "ContactForm", "TestimonialCards", "GalleryGrid", "FooterMinimal", "FooterStandard"]
                             },
                             "props": {
                                 "type": "object",
-                                "description": "Para Hero: 'title', 'subtitle', 'image_url'. Para Services: 'services' (array com 'name', 'description', 'image_url'). Para About: 'headline', 'text'. Para Footer: 'company_name', 'contact' ou 'text'."
+                                "description": "Propriedades específicas de cada componente. PricingTable: 'plans' ([name, price, features]). TestimonialCards: 'testimonials' ([quote, author]). GalleryGrid: 'images' ([url]). ContactForm: 'title'."
                             }
                         },
                         "required": ["type", "props"]

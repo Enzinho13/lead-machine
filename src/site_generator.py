@@ -13,6 +13,10 @@ def render_component(component_def, theme):
         'ListServices': ListServices,
         'FeatureServices': FeatureServices,
         'AboutEditorial': AboutEditorial,
+        'PricingTable': PricingTable,
+        'ContactForm': ContactForm,
+        'TestimonialCards': TestimonialCards,
+        'GalleryGrid': GalleryGrid,
         'FooterMinimal': FooterMinimal,
         'FooterStandard': FooterStandard
     }
@@ -20,6 +24,98 @@ def render_component(component_def, theme):
     if comp_type in components:
         return components[comp_type](props, theme)
     return f"<!-- Component {comp_type} not found -->"
+
+def PricingTable(props, theme):
+    plans = props.get('plans', [])
+    items_html = ""
+    for p in plans:
+        items_html += f"""
+        <div class="p-10 border border-black flex flex-col justify-between">
+            <div>
+                <h3 class="text-2xl font-medium mb-2" style="font-family: {theme.get('font_heading', 'serif')};">{p.get('name', 'Plan')}</h3>
+                <div class="text-4xl font-bold mb-6">{p.get('price', '$0')}</div>
+                <ul class="text-sm space-y-3 mb-8">
+                    {"".join(f'<li class="flex items-center"><span>- {f}</span></li>' for f in p.get('features', []))}
+                </ul>
+            </div>
+            <button class="w-full py-4 bg-black text-white uppercase tracking-widest text-xs font-bold hover:bg-gray-800 transition-colors">Select</button>
+        </div>
+        """
+    return f"""
+    <section class="py-24 px-8 border-b border-black bg-gray-50">
+        <div class="max-w-7xl mx-auto">
+            <h2 class="text-4xl md:text-5xl mb-16 text-center font-medium tracking-tight" style="font-family: {theme.get('font_heading', 'serif')};">Investment</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                {items_html}
+            </div>
+        </div>
+    </section>
+    """
+
+def ContactForm(props, theme):
+    title = props.get('title', 'Get in Touch')
+    return f"""
+    <section class="py-24 px-8 border-b border-black">
+        <div class="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-16">
+            <div>
+                <h2 class="text-5xl font-medium mb-8 tracking-tighter" style="font-family: {theme.get('font_heading', 'serif')};">{title}</h2>
+                <p class="text-lg text-gray-700 leading-relaxed" style="font-family: {theme.get('font_body', 'sans-serif')};">Fill out the form and our team will get back to you shortly.</p>
+            </div>
+            <form class="space-y-6">
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-widest mb-2">Name</label>
+                    <input type="text" class="w-full border-b border-black p-2 focus:outline-none focus:bg-gray-50" />
+                </div>
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-widest mb-2">Email</label>
+                    <input type="email" class="w-full border-b border-black p-2 focus:outline-none focus:bg-gray-50" />
+                </div>
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-widest mb-2">Message</label>
+                    <textarea class="w-full border-b border-black p-2 h-32 focus:outline-none focus:bg-gray-50"></textarea>
+                </div>
+                <button type="button" class="px-12 py-4 bg-black text-white uppercase tracking-widest text-xs font-bold hover:bg-gray-800 transition-colors">Submit</button>
+            </form>
+        </div>
+    </section>
+    """
+
+def TestimonialCards(props, theme):
+    testimonials = props.get('testimonials', [])
+    items_html = ""
+    for t in testimonials:
+        items_html += f"""
+        <div class="p-8 border-r border-black last:border-r-0 italic text-xl leading-relaxed">
+            "{t.get('quote', '')}"
+            <div class="mt-6 not-italic font-bold text-xs uppercase tracking-widest">— {t.get('author', 'Anonymous')}</div>
+        </div>
+        """
+    return f"""
+    <section class="py-24 border-b border-black">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 border-y border-black">
+            {items_html}
+        </div>
+    </section>
+    """
+
+def GalleryGrid(props, theme):
+    images = props.get('images', [])
+    items_html = ""
+    for img in images:
+        items_html += f"""
+        <div class="aspect-square border border-black overflow-hidden bg-gray-100">
+            <img src="{img}" class="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-700" />
+        </div>
+        """
+    return f"""
+    <section class="py-24 px-8 border-b border-black">
+        <div class="max-w-7xl mx-auto">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {items_html}
+            </div>
+        </div>
+    </section>
+    """
 
 def HeroMinimalist(props, theme):
     title = props.get('title', 'Title')
@@ -169,6 +265,13 @@ def gerar_site_cliente(dados_site):
     title = dados_site.get('title', 'Website')
     layout = dados_site.get('layout', [])
     theme = dados_site.get('theme', {'font_heading': 'serif', 'font_body': 'sans-serif', 'primary_color': '#000000'})
+    seo = dados_site.get('seo', {})
+    
+    # Meta tags and SEO
+    meta_title = seo.get('meta_title', title)
+    meta_desc = seo.get('meta_description', '')
+    keywords = ", ".join(seo.get('keywords', []))
+    schema_json = json.dumps(seo.get('schema_json', {}), indent=2)
     
     font_imports = ""
     # Add some default Google Fonts if they are typical ones
@@ -176,11 +279,19 @@ def gerar_site_cliente(dados_site):
         font_imports = "<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap' rel='stylesheet'>"
     
     html_content = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title}</title>
+    <title>{meta_title}</title>
+    <meta name="description" content="{meta_desc}">
+    <meta name="keywords" content="{keywords}">
+    
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {schema_json}
+    </script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {{
