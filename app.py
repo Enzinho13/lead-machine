@@ -15,6 +15,7 @@ from lead_scraper import buscar_empresas
 from auditor import auditar_site_lead
 from ai_qualifier import qualificar_lead_com_ia
 from main import executar_pipeline_e_atualizar_status
+from outreach import analisar_contatos
 
 # --- Init ---
 init_db()
@@ -178,6 +179,7 @@ with tab_crm:
         st.info("Nenhum lead encontrado.")
     else:
         df_crm = pd.DataFrame(all_leads)
+        df_crm["contato"] = df_crm.apply(lambda lead: analisar_contatos(lead)["situacao"], axis=1)
         
         # Action to move states
         st.markdown("#### Atualizar Status do Lead")
@@ -203,7 +205,7 @@ with tab_crm:
         st.markdown("#### Visão Geral dos Dados")
         
         st.dataframe(
-            df_crm[["nome", "status", "score", "nicho", "cidade", "telefone", "email", "vercel_url", "url", "outreach_message"]],
+            df_crm[["nome", "status", "score", "nicho", "cidade", "telefone", "email", "contato", "vercel_url", "url", "outreach_message"]],
             column_config={
                 "url": st.column_config.LinkColumn("Site Original"),
                 "vercel_url": st.column_config.LinkColumn("Site Gerado"),

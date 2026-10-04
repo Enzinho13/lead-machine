@@ -127,7 +127,7 @@ def init_db():
             
             c.execute("""
                 INSERT INTO outreach (lead_id, canal, mensagem, status, criado_em)
-                SELECT id, 'EMAIL', outreach_message, 'SENT', CURRENT_TIMESTAMP
+                SELECT id, 'EMAIL', outreach_message, 'DRAFT', CURRENT_TIMESTAMP
                 FROM leads_old
                 WHERE outreach_message IS NOT NULL AND outreach_message != ''
             """)

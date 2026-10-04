@@ -5,10 +5,11 @@ Generates personalized messages based on REAL audit data.
 import logging
 import sqlite3
 import time
-from typing import Dict, Any, List
+from urllib.parse import quote
+from typing import Dict, Any, List, Optional
 
 from ai_service import ai, AIError
-from contact_extractor import eh_celular_br
+from contact_extractor import eh_celular_br, normalizar_telefone_br, normalizar_email
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,42 @@ class OutreachEngine:
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute("SELECT telefone, email FROM leads WHERE id = ?", (lead_id,)).fetchone()
         return {"telefone": (row[0] or "") if row else "", "email": (row[1] or "") if row else ""}
+
+    def analisar_lead(self, lead_id: int) -> Dict[str, Any]:
+        """Situação de contato e canais disponíveis do lead, lidos do banco. Somente leitura."""
+        return analisar_contatos(self.get_contacts(lead_id))
+
+    def preparar_envio(self, lead_id: int, nome_empresa: str, qualificacao: dict,
+                       mensagem: Optional[str] = None, link_prototipo: Optional[str] = None) -> Dict[str, Any]:
+        """Prepara, SEM enviar, os dados de envio de cada canal disponível do lead.
+
+        Retorna status 'ready' (com 'payloads'), 'no_contact' ou 'blocked'; 'sent' é sempre False.
+        Não altera contatos nem grava nada no banco. Se 'mensagem' vier pronta, ela é usada em todos os
+        canais; senão a mensagem é gerada (IA ou template de fallback) para cada canal.
+        """
+        if self.check_opt_out(lead_id):
+            return {"status": "blocked", "reason": "Opt-out (LOST status)", "lead_id": lead_id, "sent": False}
+
+        analise = self.analisar_lead(lead_id)
+        resultado = {"lead_id": lead_id, "situacao": analise["situacao"], "canais": analise["canais"], "sent": False}
+        if not analise["canais"]:
+            motivo = ("Só há telefone fixo: sem canal automático disponível"
+                      if analise["situacao"] == SOMENTE_TELEFONE else "Lead sem telefone nem e-mail válidos")
+            return {**resultado, "status": "no_contact", "reason": motivo}
+
+        payloads = []
+        for canal in analise["canais"]:
+            destino = analise["telefone"] if canal == "whatsapp" else analise["email"]
+            if mensagem:
+                texto, usou_fallback = mensagem, False
+            else:
+                texto, usou_fallback = self.generate_message_with_status(nome_empresa, qualificacao, canal)
+            if link_prototipo and link_prototipo not in texto:
+                texto = f"{texto}\n\nVeja o protótipo: {link_prototipo}"
+            payload = montar_payload_envio(canal, destino, texto, nome_empresa)
+            payload["usou_fallback"] = usou_fallback
+            payloads.append(payload)
+        return {**resultado, "status": "ready", "payloads": payloads}
 
     def is_rate_limited(self, channel: str) -> bool:
         """Simple rate limiting: max 5 messages per minute per channel."""
@@ -95,7 +132,10 @@ class OutreachEngine:
             ), True
 
     def dispatch(self, lead_id: int, nome_empresa: str, qualificacao: dict, canal: str = "whatsapp") -> Dict[str, Any]:
-        """Orchestrates message generation, validation, and simulated dispatch."""
+        """Gera a mensagem e registra um RASCUNHO (status DRAFT) em outreach. NÃO envia nada.
+
+        O nome é mantido por compatibilidade com o pipeline. Para dados de envio por canal, use preparar_envio.
+        """
         if self.check_opt_out(lead_id):
             return {"status": "blocked", "reason": "Opt-out (LOST status)"}
             
@@ -108,11 +148,55 @@ class OutreachEngine:
         # Save to DB history
         with sqlite3.connect(self.db_path) as conn:
             c = conn.cursor()
-            c.execute("INSERT INTO outreach (lead_id, canal, mensagem, status) VALUES (?, ?, ?, 'SENT')", 
+            c.execute("INSERT INTO outreach (lead_id, canal, mensagem, status) VALUES (?, ?, ?, 'DRAFT')", 
                       (lead_id, canal.upper(), msg))
             conn.commit()
             
-        return {"status": "success", "message": msg, "used_fallback": used_fallback}
+        return {"status": "success", "message": msg, "used_fallback": used_fallback, "sent": False}
+
+
+# Situação de contato do lead, calculada apenas com contatos VÁLIDOS
+SEM_CONTATO = "sem_contato"
+SOMENTE_TELEFONE = "somente_telefone"
+SOMENTE_EMAIL = "somente_email"
+TELEFONE_E_EMAIL = "telefone_e_email"
+
+
+def _texto(valor) -> str:
+    return valor if isinstance(valor, str) else ""
+
+
+def analisar_contatos(contatos) -> Dict[str, Any]:
+    """Classifica os contatos de um lead SEM alterá-los (sem rede, sem IA, sem banco).
+
+    Aceita um dict ou uma linha de lead (qualquer objeto com .get). Valor inválido conta como ausente.
+    'telefone' e 'email' devolvidos são as versões normalizadas, usadas só para o envio futuro.
+    """
+    telefone = normalizar_telefone_br(_texto(contatos.get("telefone")))
+    email = normalizar_email(_texto(contatos.get("email")))
+    celular = eh_celular_br(telefone)
+    if telefone and email:
+        situacao = TELEFONE_E_EMAIL
+    elif telefone:
+        situacao = SOMENTE_TELEFONE
+    elif email:
+        situacao = SOMENTE_EMAIL
+    else:
+        situacao = SEM_CONTATO
+    canais = ((["whatsapp"] if celular else []) + (["email"] if email else []))
+    return {"telefone": telefone, "email": email, "telefone_eh_celular": celular, "situacao": situacao, "canais": canais}
+
+
+def montar_payload_envio(canal: str, destino: str, mensagem: str, nome_empresa: str = "") -> Dict[str, Any]:
+    """Monta os dados para um FUTURO envio. Só constrói o dicionário: não envia nem grava nada."""
+    payload = {"canal": canal, "destino": destino, "mensagem": mensagem, "sent": False}
+    if canal == "whatsapp":
+        payload["link_whatsapp"] = f"https://wa.me/{destino.lstrip('+')}?text={quote(mensagem, safe='')}"
+    elif canal == "email":
+        payload["assunto"] = f"Sobre o site da {nome_empresa}" if nome_empresa else "Sobre o site da sua empresa"
+    else:
+        raise ValueError(f"Canal não suportado: {canal}")
+    return payload
 
 
 def canais_disponiveis(contatos: Dict[str, str]) -> List[str]:
@@ -120,12 +204,7 @@ def canais_disponiveis(contatos: Dict[str, str]) -> List[str]:
 
     Telefone fixo sozinho não habilita nenhum canal automático. Aceita o dict de get_contacts ou uma linha de lead.
     """
-    canais = []
-    if eh_celular_br(contatos.get("telefone") or ""):
-        canais.append("whatsapp")
-    if contatos.get("email"):
-        canais.append("email")
-    return canais
+    return analisar_contatos(contatos)["canais"]
 
 
 # Backward compatibility wrapper
