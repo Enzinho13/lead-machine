@@ -125,6 +125,12 @@ def test_numeros_que_nao_sao_telefone_sao_ignorados():
     assert ce.extrair_contatos_do_html(html, "https://x.com.br") == {"telefone": "", "email": ""}
 
 
+def test_numero_solto_sem_formatacao_no_texto_nao_vira_telefone_mas_em_link_sim():
+    # 11 dígitos colados no texto podem ser CPF/protocolo; em link tel: a intenção de ligar é explícita
+    assert ce.extrair_contatos_do_html(pagina("<p>Protocolo 11975859568 e 1140123456</p>"), "https://x.com.br")["telefone"] == ""
+    assert ce.extrair_contatos_do_html(pagina('<a href="tel:11975859568">x</a>'), "https://x.com.br")["telefone"] == CELULAR
+
+
 def test_scripts_e_estilos_sao_ignorados():
     html = '<html><head><script>var t="(11) 97585-9568"; var e="a@dominio.com.br";</script><style>.a{}</style></head><body>oi</body></html>'
     assert ce.extrair_contatos_do_html(html, "https://dominio.com.br") == {"telefone": "", "email": ""}
