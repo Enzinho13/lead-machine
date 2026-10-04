@@ -14,7 +14,7 @@ from database import init_db, get_all_leads, update_lead_status, update_lead_sco
 from lead_scraper import buscar_empresas
 from auditor import auditar_site_lead
 from ai_qualifier import qualificar_lead_com_ia
-from main import executar_pipeline_completo
+from main import executar_pipeline_e_atualizar_status
 
 # --- Init ---
 init_db()
@@ -144,6 +144,7 @@ with tab_pipeline:
             if st.button(f"🚀 Acionar Gerador para {len(selected)} leads", type="primary", disabled=len(selected) == 0):
                 bar = st.progress(0)
                 status_text = st.empty()
+                falhas = []
 
                 for i, lead in enumerate(selected):
                     nome = lead["nome"]
@@ -151,20 +152,24 @@ with tab_pipeline:
                     status_text.text(f"Processando: {nome}...")
 
                     # Pipeline: Design -> Component HTML -> QA -> Deploy -> Outreach Msg
-                    link = executar_pipeline_completo(
+                    link = executar_pipeline_e_atualizar_status(
                         nome,
                         lead.get("nicho", "Negócio"),
                         lead.get("cidade", "Brasil"),
                         url,
                     )
 
-                    # Move to CONTACTED phase since outreach is prepared
-                    update_lead_status(url, "CONTACTED", vercel_url=link if link else "")
+                    # CONTACTED é atribuído dentro do helper, só quando o pipeline termina com sucesso
+                    if not link:
+                        falhas.append(nome)
                     bar.progress((i + 1) / len(selected))
 
-                st.success("Geração concluída!")
-                time.sleep(1.5)
-                st.rerun()
+                if falhas:
+                    st.warning(f"Pipeline falhou para {len(falhas)} lead(s): {', '.join(falhas)}. Status mantido; veja os logs.")
+                else:
+                    st.success("Geração concluída!")
+                    time.sleep(1.5)
+                    st.rerun()
 
 # === CRM MANAGER ===
 with tab_crm:
@@ -198,7 +203,7 @@ with tab_crm:
         st.markdown("#### Visão Geral dos Dados")
         
         st.dataframe(
-            df_crm[["nome", "status", "score", "nicho", "cidade", "vercel_url", "url", "outreach_message"]],
+            df_crm[["nome", "status", "score", "nicho", "cidade", "telefone", "email", "vercel_url", "url", "outreach_message"]],
             column_config={
                 "url": st.column_config.LinkColumn("Site Original"),
                 "vercel_url": st.column_config.LinkColumn("Site Gerado"),

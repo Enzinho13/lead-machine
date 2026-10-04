@@ -4,7 +4,8 @@ import sys
 
 # Garante que o database pode ser importado corretamente
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from database import init_db, insert_lead
+from database import init_db, insert_lead, get_lead_by_url, update_lead_contacts, get_leads_sem_contato
+from contact_extractor import buscar_contatos_do_site
 
 # REGRA DE NEGÓCIO: Domínios proibidos (Diretórios, Redes Sociais, Agregadores)
 BANNED_DOMAINS = [
@@ -13,6 +14,21 @@ BANNED_DOMAINS = [
     "doctoralia.com.br", "guiatelefone.com", "telelistas.net",
     "yelp.com", "tripadvisor.com", "comerciosaopaulo.com.br"
 ]
+
+def _enriquecer_contatos(site_url: str) -> bool:
+    """Busca telefone/e-mail públicos no site e grava só onde o lead ainda não tem. Nunca derruba o discovery."""
+    try:
+        contatos = buscar_contatos_do_site(site_url)
+        update_lead_contacts(site_url, contatos["telefone"], contatos["email"])
+        return bool(contatos["telefone"] or contatos["email"])
+    except Exception as e:
+        print(f"[WARN] Falha ao buscar contatos de {site_url}: {e}")
+        return False
+
+def enriquecer_contatos_pendentes() -> int:
+    """Backfill: busca contatos dos leads já salvos que não têm telefone nem e-mail. Retorna quantos receberam algum contato."""
+    init_db()
+    return sum(1 for lead in get_leads_sem_contato() if _enriquecer_contatos(lead["url"]))
 
 def buscar_empresas(nicho: str, cidade: str, max_resultados: int = 5):
     print(f"[DISCOVERY] Iniciando busca por '{nicho} em {cidade}'...")
@@ -44,6 +60,11 @@ def buscar_empresas(nicho: str, cidade: str, max_resultados: int = 5):
                     
                     # DATA EXTRACTION: Salva no SQLite
                     insert_lead(nome_limpo, site_url, descricao, nicho, cidade)
+
+                    # CONTATOS: só busca no site se o lead (novo ou já existente) ainda não tem nenhum
+                    lead_salvo = get_lead_by_url(site_url)
+                    if lead_salvo and not (lead_salvo.get("telefone") or lead_salvo.get("email")):
+                        _enriquecer_contatos(site_url)
                     leads_encontrados += 1
                     
     except Exception as e:

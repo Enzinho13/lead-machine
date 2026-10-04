@@ -15,7 +15,7 @@ load_dotenv()
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
 
 from auditor import auditar_site_lead
-from database import save_outreach_data
+from database import save_outreach_data, update_lead_status
 from deployer import fazer_deploy_site
 from design_director import DesignDirector
 from qa_engine import executar_qa
@@ -109,3 +109,14 @@ def executar_pipeline_completo(nome_bruto: str, nicho: str, cidade: str, url_lea
                 logger.warning(f"[PIPELINE] Outreach bloqueado: {result.get('reason')}")
 
     return url_online
+
+
+def executar_pipeline_e_atualizar_status(nome_bruto: str, nicho: str, cidade: str, url_lead: str) -> str | None:
+    """Roda o pipeline e só move o lead para CONTACTED se ele terminou com sucesso (link publicado).
+
+    Se o pipeline falhar (None), o status do lead não muda e ele pode ser reprocessado.
+    """
+    link = executar_pipeline_completo(nome_bruto, nicho, cidade, url_lead)
+    if link:
+        update_lead_status(url_lead, "CONTACTED", vercel_url=link)
+    return link

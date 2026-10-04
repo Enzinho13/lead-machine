@@ -8,6 +8,7 @@ import time
 from typing import Dict, Any, List
 
 from ai_service import ai, AIError
+from contact_extractor import eh_celular_br
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,12 @@ class OutreachEngine:
             if row and row[0] == 'LOST':
                 return True
         return False
+
+    def get_contacts(self, lead_id: int) -> Dict[str, str]:
+        """Telefone/e-mail públicos já capturados do lead ('' quando não há). Somente leitura: nada é enviado."""
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute("SELECT telefone, email FROM leads WHERE id = ?", (lead_id,)).fetchone()
+        return {"telefone": (row[0] or "") if row else "", "email": (row[1] or "") if row else ""}
 
     def is_rate_limited(self, channel: str) -> bool:
         """Simple rate limiting: max 5 messages per minute per channel."""
@@ -106,6 +113,19 @@ class OutreachEngine:
             conn.commit()
             
         return {"status": "success", "message": msg, "used_fallback": used_fallback}
+
+
+def canais_disponiveis(contatos: Dict[str, str]) -> List[str]:
+    """Canais utilizáveis a partir dos contatos do lead: WhatsApp exige celular; e-mail exige e-mail.
+
+    Telefone fixo sozinho não habilita nenhum canal automático. Aceita o dict de get_contacts ou uma linha de lead.
+    """
+    canais = []
+    if eh_celular_br(contatos.get("telefone") or ""):
+        canais.append("whatsapp")
+    if contatos.get("email"):
+        canais.append("email")
+    return canais
 
 
 # Backward compatibility wrapper

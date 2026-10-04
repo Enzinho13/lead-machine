@@ -31,6 +31,8 @@ def init_db():
                 score INTEGER DEFAULT 0,
                 motivos_score TEXT DEFAULT '',
                 fonte TEXT DEFAULT '',
+                telefone TEXT DEFAULT '',
+                email TEXT DEFAULT '',
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -80,6 +82,13 @@ def init_db():
             )
         ''')
         
+        # Migra bancos existentes: adiciona as colunas de contato sem tocar nos dados atuais
+        c.execute("PRAGMA table_info(leads)")
+        colunas_leads = {row[1] for row in c.fetchall()}
+        for coluna in ("telefone", "email"):
+            if coluna not in colunas_leads:
+                c.execute(f"ALTER TABLE leads ADD COLUMN {coluna} TEXT DEFAULT ''")
+
         # Triggers
         c.execute('''
             CREATE TRIGGER IF NOT EXISTS update_leads_atualizado_em 
@@ -170,6 +179,28 @@ def update_lead_status(url, status, vercel_url=''):
                 else:
                     c.execute("INSERT INTO projects (lead_id, vercel_url) VALUES (?, ?)", (lead_id, vercel_url))
         conn.commit()
+
+def update_lead_contacts(url, telefone='', email=''):
+    """Preenche telefone/e-mail só onde o lead ainda não tem valor. Nunca sobrescreve nem apaga."""
+    if not telefone and not email:
+        return
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("""
+            UPDATE leads SET
+                telefone = CASE WHEN COALESCE(telefone, '') = '' THEN ? ELSE telefone END,
+                email = CASE WHEN COALESCE(email, '') = '' THEN ? ELSE email END
+            WHERE url = ?
+        """, (telefone or '', email or '', url))
+        conn.commit()
+
+def get_leads_sem_contato():
+    """Leads sem telefone E sem e-mail (candidatos a busca/backfill de contato)."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM leads WHERE COALESCE(telefone, '') = '' AND COALESCE(email, '') = ''")
+        return [dict(row) for row in c.fetchall()]
 
 def update_lead_score(url, score, motivos):
     with sqlite3.connect(DB_PATH) as conn:
