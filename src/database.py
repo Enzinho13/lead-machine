@@ -149,14 +149,15 @@ def insert_lead(nome, url, descricao, nicho, cidade):
             pass 
 
 def get_all_leads():
+    """Um registro por lead: projeto e mensagem de outreach vêm da 1ª linha de cada tabela (não duplica o lead)."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
         c.execute("""
             SELECT l.*, p.vercel_url, o.mensagem as outreach_message, p.design_brief 
             FROM leads l 
-            LEFT JOIN projects p ON p.lead_id = l.id 
-            LEFT JOIN outreach o ON o.lead_id = l.id 
+            LEFT JOIN projects p ON p.id = (SELECT MIN(id) FROM projects WHERE lead_id = l.id) 
+            LEFT JOIN outreach o ON o.id = (SELECT MIN(id) FROM outreach WHERE lead_id = l.id) 
             ORDER BY l.status DESC, l.score ASC, l.criado_em DESC
         """)
         rows = c.fetchall()
@@ -228,6 +229,37 @@ def save_outreach_data(url, outreach_message, design_brief):
                 c.execute("UPDATE projects SET design_brief = ? WHERE lead_id = ?", (str(design_brief), lead_id))
             else:
                 c.execute("INSERT INTO projects (lead_id, design_brief) VALUES (?, ?)", (lead_id, str(design_brief)))
+        conn.commit()
+
+def save_design_brief(url, design_brief):
+    """Grava só o design_brief do projeto do lead (cria o projeto se não existir). Não toca em outreach."""
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT id FROM leads WHERE url = ?", (url,))
+        row = c.fetchone()
+        if row:
+            lead_id = row[0]
+            c.execute("SELECT id FROM projects WHERE lead_id = ?", (lead_id,))
+            if c.fetchone():
+                c.execute("UPDATE projects SET design_brief = ? WHERE lead_id = ?", (str(design_brief), lead_id))
+            else:
+                c.execute("INSERT INTO projects (lead_id, design_brief) VALUES (?, ?)", (lead_id, str(design_brief)))
+        conn.commit()
+
+def save_outreach_draft(lead_id, canal, mensagem):
+    """Grava/atualiza o RASCUNHO de um canal do lead. DRAFT = mensagem preparada, NUNCA enviada.
+
+    Uma linha por (lead, canal): rodar o pipeline de novo atualiza o rascunho em vez de duplicá-lo.
+    """
+    canal = canal.upper()
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT id FROM outreach WHERE lead_id = ? AND canal = ?", (lead_id, canal))
+        row = c.fetchone()
+        if row:
+            c.execute("UPDATE outreach SET mensagem = ?, status = 'DRAFT' WHERE id = ?", (mensagem, row[0]))
+        else:
+            c.execute("INSERT INTO outreach (lead_id, canal, mensagem, status) VALUES (?, ?, ?, 'DRAFT')", (lead_id, canal, mensagem))
         conn.commit()
 
 def save_audit(lead_id, audit_data):

@@ -23,7 +23,7 @@ init_db()
 st.set_page_config(page_title="Lead Machine", page_icon="🧠", layout="wide")
 st.title("🧠 Lead Machine — Command Center")
 
-CRM_STATES = ["NEW", "DISCOVERED", "AUDITING", "AUDITED", "QUALIFIED", "CONTACTED", "REPLIED", "MEETING", "PROPOSAL", "WON", "LOST"]
+CRM_STATES = ["NEW", "DISCOVERED", "AUDITING", "AUDITED", "QUALIFIED", "DEPLOYED", "CONTACTED", "REPLIED", "MEETING", "PROPOSAL", "WON", "LOST"]
 
 # --- Sidebar: CRM Stats ---
 with st.sidebar:
@@ -160,7 +160,7 @@ with tab_pipeline:
                         url,
                     )
 
-                    # CONTACTED é atribuído dentro do helper, só quando o pipeline termina com sucesso
+                    # DEPLOYED é atribuído dentro do helper, só quando o site é publicado
                     if not link:
                         falhas.append(nome)
                     bar.progress((i + 1) / len(selected))

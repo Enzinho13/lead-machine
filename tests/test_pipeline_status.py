@@ -1,10 +1,12 @@
 """
-Regressão: um pipeline que falha (retorna None) NÃO pode mover o lead para CONTACTED.
+Regressão: um pipeline que falha (retorna None) NÃO pode mover o lead para DEPLOYED.
+Deploy com sucesso move para DEPLOYED, nunca para CONTACTED.
 
 Usa um SQLite temporário (database.DB_PATH é substituído) e substitui executar_pipeline_completo
 por um fake: sem API, sem deploy, sem envio de mensagens, sem tocar no leads.db real.
 Roda com `python tests/test_pipeline_status.py` ou com pytest.
 """
+import inspect
 import os
 import sys
 import tempfile
@@ -48,16 +50,18 @@ def projeto_vercel_url():
     return leads[0]["vercel_url"]
 
 
-def test_falha_do_pipeline_nao_move_para_contacted():
+def test_falha_do_pipeline_nao_move_para_deployed():
     with DbTemporario():
         resultado, fake = rodar(retorno_pipeline=None)
         assert resultado is None
         fake.assert_called_once()
-        assert database.get_lead_by_url(URL)["status"] == "QUALIFIED"
+        status = database.get_lead_by_url(URL)["status"]
+        assert status == "QUALIFIED"
+        assert status != "DEPLOYED"
         assert not projeto_vercel_url()
 
 
-def test_excecao_no_pipeline_nao_move_para_contacted():
+def test_excecao_no_pipeline_nao_move_para_deployed():
     with DbTemporario():
         try:
             rodar(erro=RuntimeError("falha simulada"))
@@ -65,15 +69,26 @@ def test_excecao_no_pipeline_nao_move_para_contacted():
             pass
         else:
             raise AssertionError("a exceção deveria propagar")
-        assert database.get_lead_by_url(URL)["status"] == "QUALIFIED"
+        status = database.get_lead_by_url(URL)["status"]
+        assert status == "QUALIFIED"
+        assert status != "DEPLOYED"
 
 
-def test_sucesso_move_para_contacted_e_grava_link():
+def test_sucesso_move_para_deployed_e_grava_link():
     with DbTemporario():
         resultado, _ = rodar(retorno_pipeline="https://lead-teste.vercel.app")
         assert resultado == "https://lead-teste.vercel.app"
-        assert database.get_lead_by_url(URL)["status"] == "CONTACTED"
+        status = database.get_lead_by_url(URL)["status"]
+        assert status == "DEPLOYED"
+        assert status != "CONTACTED"
         assert projeto_vercel_url() == "https://lead-teste.vercel.app"
+
+
+def test_helper_pos_deploy_usa_deployed_e_nao_contacted():
+    with open(os.path.join(ROOT_DIR, "main.py"), encoding="utf-8") as f:
+        fonte = inspect.getsource(main.executar_pipeline_e_atualizar_status)
+    assert '"DEPLOYED"' in fonte
+    assert '"CONTACTED"' not in fonte
 
 
 def test_app_usa_o_helper_e_nao_chama_o_pipeline_cru():
