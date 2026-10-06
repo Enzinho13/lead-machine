@@ -1,6 +1,8 @@
 import sqlite3
 import os
 import json
+import time
+import uuid
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 DB_PATH = os.path.join(BASE_DIR, "leads.db")
@@ -33,6 +35,12 @@ def init_db():
                 fonte TEXT DEFAULT '',
                 telefone TEXT DEFAULT '',
                 email TEXT DEFAULT '',
+                claimed_by TEXT DEFAULT '',
+                claim_token TEXT DEFAULT '',
+                claim_expires_at REAL DEFAULT 0,
+                attempts INTEGER DEFAULT 0,
+                last_error TEXT DEFAULT '',
+                retry_after REAL DEFAULT 0,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -88,6 +96,14 @@ def init_db():
         for coluna in ("telefone", "email"):
             if coluna not in colunas_leads:
                 c.execute(f"ALTER TABLE leads ADD COLUMN {coluna} TEXT DEFAULT ''")
+
+        # Migra bancos existentes: colunas de claim/retry do orquestrador (sem tocar nos dados atuais)
+        for coluna, definicao in (
+            ("claimed_by", "TEXT DEFAULT ''"), ("claim_token", "TEXT DEFAULT ''"), ("claim_expires_at", "REAL DEFAULT 0"),
+            ("attempts", "INTEGER DEFAULT 0"), ("last_error", "TEXT DEFAULT ''"), ("retry_after", "REAL DEFAULT 0"),
+        ):
+            if coluna not in colunas_leads:
+                c.execute(f"ALTER TABLE leads ADD COLUMN {coluna} {definicao}")
 
         # Triggers
         c.execute('''
@@ -230,6 +246,116 @@ def save_outreach_data(url, outreach_message, design_brief):
             else:
                 c.execute("INSERT INTO projects (lead_id, design_brief) VALUES (?, ?)", (lead_id, str(design_brief)))
         conn.commit()
+
+def acquire_lease(url, worker_id, ttl_seconds=900, max_attempts=3, now=None, token=None):
+    """Lease exclusivo de um lead (um único UPDATE atômico no SQLite). Devolve o TOKEN de ownership, ou None.
+
+    O token é único por aquisição: só quem o detém renova, libera ou registra o desfecho do lead.
+    Lease expirado (worker morto ou lento) pode ser retomado por outro worker, e o token antigo perde
+    a autoridade. Cada aquisição conta uma tentativa (attempts + 1); sem tentativas restantes é recusada.
+    """
+    now = time.time() if now is None else now
+    token = token or uuid.uuid4().hex
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        cur = conn.execute("""
+            UPDATE leads
+            SET claimed_by = ?, claim_token = ?, claim_expires_at = ?, attempts = COALESCE(attempts, 0) + 1
+            WHERE url = ? AND COALESCE(attempts, 0) < ?
+              AND (COALESCE(claimed_by, '') = '' OR COALESCE(claim_expires_at, 0) <= ?)
+        """, (worker_id, token, now + ttl_seconds, url, max_attempts, now))
+        conn.commit()
+        return token if cur.rowcount == 1 else None
+
+def claim_lead(url, worker_id, ttl_seconds=900, max_attempts=3, now=None):
+    """Versão booleana de acquire_lease (o token é o próprio worker_id)."""
+    return acquire_lease(url, worker_id, ttl_seconds, max_attempts, now, token=worker_id) is not None
+
+def renew_lease(url, token, ttl_seconds=900, now=None):
+    """Heartbeat: estende o lease. Só funciona para quem ainda detém o token; depois que outro worker
+    assumiu (ou o lease foi liberado) devolve False e nada é alterado."""
+    if not token:
+        return False
+    now = time.time() if now is None else now
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        cur = conn.execute(
+            "UPDATE leads SET claim_expires_at = ? WHERE url = ? AND claim_token = ? AND COALESCE(claimed_by, '') != ''",
+            (now + ttl_seconds, url, token))
+        conn.commit()
+        return cur.rowcount == 1
+
+def owns_lease(url, token):
+    """True se o token ainda é o dono atual do lead (nenhum outro worker assumiu)."""
+    if not token:
+        return False
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM leads WHERE url = ? AND claim_token = ? AND COALESCE(claimed_by, '') != ''", (url, token)).fetchone()
+        return row is not None
+
+def release_lead(url, token):
+    """Libera o lease, mas só se o token ainda for o do dono (token antigo não solta o lease de outro worker)."""
+    if not token:
+        return False
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        cur = conn.execute(
+            "UPDATE leads SET claimed_by = '', claim_token = '', claim_expires_at = 0 WHERE url = ? AND claim_token = ?",
+            (url, token))
+        conn.commit()
+        return cur.rowcount == 1
+
+def _so_do_dono(token):
+    """Cláusula SQL extra: com token, a escrita só vale se o token ainda for o dono do lead."""
+    return (" AND claim_token = ?", (token,)) if token is not None else ("", ())
+
+def mark_lead_failure(url, error, backoff_seconds=300, now=None, token=None):
+    """Registra a falha e agenda a próxima tentativa: retry_after = agora + backoff * tentativas.
+    Com token, só grava se o token ainda for o dono (devolve False caso contrário)."""
+    now = time.time() if now is None else now
+    extra_sql, extra = _so_do_dono(token)
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        cur = conn.execute(
+            "UPDATE leads SET last_error = ?, retry_after = ? + ? * COALESCE(attempts, 0) WHERE url = ?" + extra_sql,
+            (str(error)[:500], now, backoff_seconds, url, *extra))
+        conn.commit()
+        return cur.rowcount == 1
+
+def mark_lead_success(url, token=None):
+    """Zera tentativas, erro e backoff do lead. Com token, só vale se o token ainda for o dono."""
+    extra_sql, extra = _so_do_dono(token)
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        cur = conn.execute(
+            "UPDATE leads SET attempts = 0, last_error = '', retry_after = 0 WHERE url = ?" + extra_sql, (url, *extra))
+        conn.commit()
+        return cur.rowcount == 1
+
+def exhaust_lead(url, reason, max_attempts=3, token=None):
+    """Encerra as tentativas (resultado final, ex.: lead não qualificado): o worker não o pega mais.
+    Com token, só vale se o token ainda for o dono."""
+    extra_sql, extra = _so_do_dono(token)
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        cur = conn.execute(
+            "UPDATE leads SET attempts = ?, last_error = ?, retry_after = 0 WHERE url = ?" + extra_sql,
+            (max_attempts, reason, url, *extra))
+        conn.commit()
+        return cur.rowcount == 1
+
+def get_next_lead(statuses, max_attempts=3, now=None):
+    """Próximo lead elegível para um worker: status processável (ou DEPLOYED com rascunho pendente),
+    tentativas restantes, fora do backoff e sem claim ativo. Os com menos tentativas vêm primeiro."""
+    now = time.time() if now is None else now
+    marcas = ", ".join("?" for _ in statuses)
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(f"""
+            SELECT * FROM leads
+            WHERE (status IN ({marcas}) OR (status = 'DEPLOYED' AND COALESCE(last_error, '') != ''))
+              AND COALESCE(attempts, 0) < ?
+              AND COALESCE(retry_after, 0) <= ?
+              AND (COALESCE(claimed_by, '') = '' OR COALESCE(claim_expires_at, 0) <= ?)
+            ORDER BY COALESCE(attempts, 0) ASC, id ASC
+            LIMIT 1
+        """, (*statuses, max_attempts, now, now)).fetchone()
+        return dict(row) if row else None
 
 def save_design_brief(url, design_brief):
     """Grava só o design_brief do projeto do lead (cria o projeto se não existir). Não toca em outreach."""
